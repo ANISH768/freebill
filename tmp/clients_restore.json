@@ -1,0 +1,296 @@
+[
+  {
+    "id": 1,
+    "name": "Ramesh Kumar (Demo)",
+    "phone": "9876543210",
+    "gstin": "07AAAAA1111A1Z1",
+    "address": "Sector 2, Delhi, India"
+  },
+  {
+    "id": 2,
+    "name": "Mohit Saini (Demo)",
+    "phone": "9123456789",
+    "gstin": "",
+    "address": "Ambala City, Haryana, India"
+  },
+  {
+    "id": 1782836239792,
+    "name": "TAJ AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "MAKDI"
+  },
+  {
+    "id": 1782837958639,
+    "name": "DHANI AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "BALOND"
+  },
+  {
+    "id": 1782838262114,
+    "name": "KAILASH AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "SHAMPUR"
+  },
+  {
+    "id": 1782839938993,
+    "name": "LOKESH AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "HADIGAON"
+  },
+  {
+    "id": 1782840961955,
+    "name": "BADAL AUTO",
+    "phone": "123456799",
+    "gstin": "",
+    "address": "JUGANI"
+  },
+  {
+    "id": 1782841479125,
+    "name": "PAPPU AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "LANJODA "
+  },
+  {
+    "id": 1781172884913,
+    "name": "TILAK RANA",
+    "phone": "9039518124",
+    "gstin": "",
+    "address": "BADEDONGER"
+  },
+  {
+    "id": 1781191451475,
+    "name": "RAM SHING ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "KONGUD"
+  },
+  {
+    "id": 1781191958723,
+    "name": "SIYALAL ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BADGAI"
+  },
+  {
+    "id": 1781194681416,
+    "name": "UMESH DEWANGAN ",
+    "phone": "1234567899",
+    "gstin": "",
+    "address": "URANDABEDA"
+  },
+  {
+    "id": 1781196871145,
+    "name": "TILAK DEWANGAN ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BADEDONGER "
+  },
+  {
+    "id": 1781198212890,
+    "name": "GOLU AUTO ",
+    "phone": "123567899",
+    "gstin": "",
+    "address": "BADEDONGER "
+  },
+  {
+    "id": 1781200072764,
+    "name": "PINTU AUTO ",
+    "phone": "12345567890",
+    "gstin": "",
+    "address": "DHANORA "
+  },
+  {
+    "id": 1781201294410,
+    "name": "JOHAN VADDE",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BADEDOGER"
+  },
+  {
+    "id": 1781621782602,
+    "name": "SAHU AUTO PARTS",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "MAKDI"
+  },
+  {
+    "id": 1781622547131,
+    "name": "DHANI AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BALOND"
+  },
+  {
+    "id": 1781622890286,
+    "name": "DINESH AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "KARMARI"
+  },
+  {
+    "id": 1781623585132,
+    "name": "UTTAM AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "MAKDI"
+  },
+  {
+    "id": 1781624845424,
+    "name": "YUGAL AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "RANDHNA "
+  },
+  {
+    "id": 1781625435464,
+    "name": "LOKESH AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "HADIGAON "
+  },
+  {
+    "id": 1781626026515,
+    "name": "KAILASH AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "SAMPUR"
+  },
+  {
+    "id": 1781629847589,
+    "name": "KEJU AUTO ",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "KERAWAHI"
+  },
+  {
+    "id": 1781799759232,
+    "name": "MASSU CYCLE STORE ",
+    "phone": "",
+    "gstin": "",
+    "address": "CHAPAI"
+  },
+  {
+    "id": 1781800783310,
+    "name": "LOKESH AUTO ",
+    "phone": "",
+    "gstin": "",
+    "address": "BEDMA "
+  },
+  {
+    "id": 1781802974324,
+    "name": "SANTOSH AUTO",
+    "phone": "",
+    "gstin": "",
+    "address": "CHAPAI"
+  },
+  {
+    "id": 1781803310496,
+    "name": "MATA RANI AUTO ",
+    "phone": "",
+    "gstin": "",
+    "address": "AALOR"
+  },
+  {
+    "id": 1782401012113,
+    "name": "SOMAN AUTO",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "KOTOAD"
+  },
+  {
+    "id": 1782401322595,
+    "name": "SAMBHU AUTO",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "CHAPAI"
+  },
+  {
+    "id": 1782403068637,
+    "name": "DINESH AUTO ODAGAON",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "ODAGAON"
+  },
+  {
+    "id": 1782407071968,
+    "name": "SANIT AUTO PARTS",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "BADE DONGER"
+  },
+  {
+    "id": 1782407382898,
+    "name": "NIRMAL CYCLE STORE",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "KOTPAD"
+  },
+  {
+    "id": 1782407805448,
+    "name": "BERENDRA AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "ODAGAON"
+  },
+  {
+    "id": 1782409335027,
+    "name": "PREM AUTO",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BANIYAGAON"
+  },
+  {
+    "id": 1782873294783,
+    "name": "ASMAN AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "BALOND"
+  },
+  {
+    "id": 1782873538279,
+    "name": "VINAY AUTO",
+    "phone": "123456798",
+    "gstin": "",
+    "address": "MAKDI"
+  },
+  {
+    "id": 1782882543660,
+    "name": "SAWAN AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": ""
+  },
+  {
+    "id": 1782883487420,
+    "name": "UTTAM AUTO",
+    "phone": "123156789",
+    "gstin": "",
+    "address": "MAKDI"
+  },
+  {
+    "id": 1783000305119,
+    "name": "DAKESHWAR AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "TODASHI"
+  },
+  {
+    "id": 1783011157124,
+    "name": "PINTU AUTO",
+    "phone": "123456789",
+    "gstin": "",
+    "address": "URANDABEDA"
+  },
+  {
+    "id": 1783055887585,
+    "name": "MARUTI AUTO",
+    "phone": "1234567890",
+    "gstin": "",
+    "address": "BAHIGAON"
+  }
+]

@@ -1,0 +1,401 @@
+[
+  {
+    "id": 1781200158166,
+    "serial": "BILL-2026-5659",
+    "date": "2026-06-11",
+    "dueDate": "2026-06-18",
+    "clientName": "MAA SHARDA AUTO ",
+    "clientPhone": "1234567890",
+    "clientAddr": "BADEDONGER ",
+    "deliveryNote": "",
+    "terms": "",
+    "subtotal": 13955,
+    "taxPct": 0,
+    "taxAmt": 0,
+    "cashDiscount": 0,
+    "grandTotal": 13955,
+    "paidAmount": 0,
+    "balanceDue": 13955,
+    "status": "PENDING",
+    "items": [
+      {
+        "name": "KICK SHAFT DLX STAR",
+        "qty": 5,
+        "unit": "Pcs",
+        "mrp": 218,
+        "price": 140,
+        "disc": 0,
+        "total": 700
+      },
+      {
+        "name": "KICK SPRING STAR",
+        "qty": 20,
+        "unit": "Pcs",
+        "mrp": 38,
+        "price": 20,
+        "disc": 0,
+        "total": 400
+      },
+      {
+        "name": "KICK GUIDE STAR",
+        "qty": 20,
+        "unit": "Pcs",
+        "mrp": 22,
+        "price": 13,
+        "disc": 0,
+        "total": 260
+      },
+      {
+        "name": "CAM SHAFT CD DLX BEARING ARRO",
+        "qty": 1,
+        "unit": "Pcs",
+        "mrp": 260,
+        "price": 169,
+        "disc": 0,
+        "total": 169
+      },
+      {
+        "name": "PINON OIL SEAL",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 15,
+        "price": 10,
+        "disc": 0,
+        "total": 100
+      },
+      {
+        "name": "VALVE OIL SEAL DLX",
+        "qty": 50,
+        "unit": "Pcs",
+        "mrp": 15,
+        "price": 10,
+        "disc": 0,
+        "total": 500
+      },
+      {
+        "name": "BUMPER SPL CLASSIQUE (HAVY)",
+        "qty": 1,
+        "unit": "Pcs",
+        "mrp": 290,
+        "price": 240,
+        "disc": 0,
+        "total": 240
+      },
+      {
+        "name": "INDICATOR DLX ORANGE OR",
+        "qty": 20,
+        "unit": "Pcs",
+        "mrp": 165,
+        "price": 145,
+        "disc": 0,
+        "total": 2900
+      },
+      {
+        "name": "POWER ZONE 4LB",
+        "qty": 3,
+        "unit": "Pcs",
+        "mrp": 800,
+        "price": 800,
+        "disc": 0,
+        "total": 2400
+      },
+      {
+        "name": "HEAD LIGHT BRACKET SPL+",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 80,
+        "price": 60,
+        "disc": 0,
+        "total": 600
+      },
+      {
+        "name": "HEAD LIGHT HOLDER DLX (J.S)",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 38,
+        "price": 25,
+        "disc": 0,
+        "total": 250
+      },
+      {
+        "name": "INDICATOR BULB SMALL 12V",
+        "qty": 1,
+        "unit": "Boxes",
+        "mrp": 150,
+        "price": 150,
+        "disc": 0,
+        "total": 150
+      },
+      {
+        "name": "FLASHER BULB WATTING J.S",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 42,
+        "price": 28,
+        "disc": 0,
+        "total": 280
+      },
+      {
+        "name": "O RING ASSY",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 20,
+        "price": 20,
+        "disc": 0,
+        "total": 200
+      },
+      {
+        "name": "SPOKET BALI",
+        "qty": 20,
+        "unit": "Pcs",
+        "mrp": 30,
+        "price": 22,
+        "disc": 0,
+        "total": 440
+      },
+      {
+        "name": "SAKTI GOLD TUBE 2-75-18",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 170,
+        "price": 170,
+        "disc": 0,
+        "total": 1700
+      },
+      {
+        "name": "HEEERO 4T",
+        "qty": 12,
+        "unit": "Pcs",
+        "mrp": 160,
+        "price": 160,
+        "disc": 0,
+        "total": 1920
+      },
+      {
+        "name": "CLUTCH CABLE OR SPL+",
+        "qty": 5,
+        "unit": "Pcs",
+        "mrp": 149,
+        "price": 129,
+        "disc": 0,
+        "total": 645
+      }
+    ]
+  },
+  {
+    "id": 1781200788933,
+    "serial": "BILL-2026-4802",
+    "date": "2026-06-11",
+    "dueDate": "2026-06-18",
+    "clientName": "RAJU AUTO ",
+    "clientPhone": "1234567890",
+    "clientAddr": "KONGUD",
+    "deliveryNote": "",
+    "terms": "",
+    "subtotal": 12224,
+    "taxPct": 0,
+    "taxAmt": 0,
+    "cashDiscount": 0,
+    "grandTotal": 12224,
+    "paidAmount": 0,
+    "balanceDue": 12224,
+    "status": "PENDING",
+    "items": [
+      {
+        "name": "SOCER ROD SUPER SPL",
+        "qty": 2,
+        "unit": "Pcs",
+        "mrp": 839,
+        "price": 680,
+        "disc": 0,
+        "total": 1360
+      },
+      {
+        "name": "INDICATOR ASCOT FRONT RT/LT",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 115,
+        "price": 85,
+        "disc": 0,
+        "total": 850
+      },
+      {
+        "name": "MIRROR HF DLX LUMAX OR",
+        "qty": 5,
+        "unit": "Pcs",
+        "mrp": 215,
+        "price": 185,
+        "disc": 0,
+        "total": 925
+      },
+      {
+        "name": "HEEERO 4T",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 160,
+        "price": 160,
+        "disc": 0,
+        "total": 1600
+      },
+      {
+        "name": "SAKTI GOLD TUBE 2-75-18",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 170,
+        "price": 170,
+        "disc": 0,
+        "total": 1700
+      },
+      {
+        "name": "ARRO BREAK SHOE FR H.H",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 115,
+        "price": 115,
+        "disc": 0,
+        "total": 1150
+      },
+      {
+        "name": "CHOKE CABLE HF DLX",
+        "qty": 5,
+        "unit": "Pcs",
+        "mrp": 60,
+        "price": 40,
+        "disc": 0,
+        "total": 200
+      },
+      {
+        "name": "THROTTAL CABLE STAR CD DLX",
+        "qty": 5,
+        "unit": "Pcs",
+        "mrp": 116,
+        "price": 95,
+        "disc": 0,
+        "total": 475
+      },
+      {
+        "name": "SPEEDO GEAR ACTIVA LUMAX",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 132,
+        "price": 95,
+        "disc": 0,
+        "total": 950
+      },
+      {
+        "name": "ARRO CHAIN SPROKET PASSION PRO",
+        "qty": 3,
+        "unit": "Pcs",
+        "mrp": 830,
+        "price": 540,
+        "disc": 0,
+        "total": 1620
+      },
+      {
+        "name": "ALLOYWHEEL ASSY REAR DLX SMALL",
+        "qty": 1,
+        "unit": "Pcs",
+        "mrp": 3720,
+        "price": 3410,
+        "disc": 0,
+        "total": 3410
+      }
+    ]
+  },
+  {
+    "id": 1781203567123,
+    "serial": "BILL-2026-7798",
+    "date": "2026-06-11",
+    "dueDate": "2026-06-18",
+    "clientName": "JAI MAA AUTO",
+    "clientPhone": "1234567890",
+    "clientAddr": "KONDAGAON",
+    "deliveryNote": "",
+    "terms": "",
+    "subtotal": 8500,
+    "taxPct": 0,
+    "taxAmt": 0,
+    "cashDiscount": 0,
+    "grandTotal": 8500,
+    "paidAmount": 0,
+    "balanceDue": 8500,
+    "status": "PENDING",
+    "items": [
+      {
+        "name": "BOSCH PLUG 6MM",
+        "qty": 50,
+        "unit": "Pcs",
+        "mrp": 75,
+        "price": 75,
+        "disc": 0,
+        "total": 3750
+      },
+      {
+        "name": "HEEERO 4T",
+        "qty": 20,
+        "unit": "Pcs",
+        "mrp": 160,
+        "price": 160,
+        "disc": 0,
+        "total": 3200
+      },
+      {
+        "name": "SAKTI GOLD TUBE 2-75-18",
+        "qty": 9,
+        "unit": "Pcs",
+        "mrp": 170,
+        "price": 170,
+        "disc": 0,
+        "total": 1530
+      }
+    ]
+  },
+  {
+    "id": 1781204123044,
+    "serial": "BILL-2026-2785",
+    "date": "2026-06-11",
+    "dueDate": "2026-06-18",
+    "clientName": "NAVIN AUTO",
+    "clientPhone": "1234567890",
+    "clientAddr": "BADA DONGAR",
+    "deliveryNote": "",
+    "terms": "",
+    "subtotal": 19800,
+    "taxPct": 0,
+    "taxAmt": 0,
+    "cashDiscount": 0,
+    "grandTotal": 19800,
+    "paidAmount": 0,
+    "balanceDue": 19800,
+    "status": "PENDING",
+    "items": [
+      {
+        "name": "BATTERY EXIDE 4LB",
+        "qty": 15,
+        "unit": "Pcs",
+        "mrp": 1050,
+        "price": 1050,
+        "disc": 0,
+        "total": 15750
+      },
+      {
+        "name": "HEEERO 4T",
+        "qty": 15,
+        "unit": "Pcs",
+        "mrp": 160,
+        "price": 160,
+        "disc": 0,
+        "total": 2400
+      },
+      {
+        "name": "SAKTI GOLD TUBE 2-75-18",
+        "qty": 10,
+        "unit": "Pcs",
+        "mrp": 170,
+        "price": 170,
+        "disc": 0,
+        "total": 1700
+      }
+    ]
+  }
+]

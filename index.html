@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="https://img.icons8.com/color/48/000000/bill.png" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>BillSync Pro - Offline Billing & Sync</title>
+    <meta name="description" content="BillSync Pro - Offline-first enterprise billing, estimate, customer ledger, and inventory management application with secure multi-device synchronization." />
+    <meta property="og:title" content="BillSync Pro - Offline Billing & Sync" />
+    <meta property="og:description" content="BillSync Pro - Offline-first enterprise billing, estimate, customer ledger, and inventory management application with secure multi-device synchronization." />
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('theme');
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+          } else if (theme === 'light') {
+            document.documentElement.classList.remove('dark');
+          } else {
+            var s = localStorage.getItem('pos_unified_app_settings');
+            if (s) {
+              var parsed = JSON.parse(s);
+              if (parsed && parsed.darkMode) {
+                document.documentElement.classList.add('dark');
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const paper = window.matchMedia('(width: 148mm)').matches ? 'A5' : 'A4';
+      document.body.classList.add(paper);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

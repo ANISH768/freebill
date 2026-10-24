@@ -1,0 +1,8 @@
+{
+  "name": "BillSync Pro",
+  "description": "BillSync Pro - Offline-first enterprise billing, estimate, customer ledger, and inventory management application with secure multi-device synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

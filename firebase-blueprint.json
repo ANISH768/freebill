@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and business settings",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "businessName": { "type": "string" },
+        "role": { "type": "string" },
+        "pin": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["phone"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Party / Customer profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "gstin": { "type": "string" },
+        "openingBalance": { "type": "number" },
+        "openingBalanceType": { "type": "string" },
+        "userPhone": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "unit": { "type": "string" },
+        "stock": { "type": "number" },
+        "price": { "type": "number" },
+        "mrp": { "type": "number" },
+        "purchasePrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "userPhone": { "type": "string" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "Estimate": {
+      "title": "Estimate",
+      "description": "Invoice / Estimate bill record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "serial": { "type": "string" },
+        "clientId": { "type": "number" },
+        "clientName": { "type": "string" },
+        "clientPhone": { "type": "string" },
+        "date": { "type": "string" },
+        "rows": { "type": "array" },
+        "total": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentMode": { "type": "string" },
+        "status": { "type": "string" },
+        "userPhone": { "type": "string" }
+      },
+      "required": ["id", "serial", "total", "date"]
+    },
+    "OtpAuditLog": {
+      "title": "OtpAuditLog",
+      "description": "Sanitized OTP attempt log for security troubleshooting without sensitive OTP content",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "failure"] },
+        "attemptType": { "type": "string" },
+        "channel": { "type": "string" },
+        "maskedPhone": { "type": "string" },
+        "provider": { "type": "string" },
+        "diagnosticCode": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "required": ["logId", "timestamp", "status", "attemptType"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Collection of registered users and stores"
+    },
+    "sync_data": {
+      "schema": "object",
+      "description": "Real-time persistent user sync envelopes"
+    },
+    "audit_logs": {
+      "schema": "OtpAuditLog",
+      "description": "Hidden collection recording OTP attempt timestamps and statuses without sensitive OTP content"
+    }
+  }
+}

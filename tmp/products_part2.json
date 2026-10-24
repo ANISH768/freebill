@@ -1,0 +1,411 @@
+[
+  {
+    "id": 1782832182525.8538,
+    "name": "ROCKMAN CHAIN KIT PASSION+",
+    "sku": "SKU-ROCK-CHAIN-KIT",
+    "unit": "Pcs",
+    "stock": 17,
+    "price": 500,
+    "mrp": 682,
+    "purchasePrice": 400
+  },
+  {
+    "id": 1782836182585.8235,
+    "name": "ARRO MIRROR RIGHT/LEFT",
+    "sku": "SKU-ARRO-MIRROR",
+    "unit": "Pcs",
+    "stock": 90,
+    "price": 90,
+    "mrp": 116,
+    "purchasePrice": 72
+  },
+  {
+    "id": 1782836182585.2712,
+    "name": "AMRRAN 4LB",
+    "sku": "SKU-AMRRAN-4LB",
+    "unit": "Pcs",
+    "stock": 38,
+    "price": 880,
+    "mrp": 880,
+    "purchasePrice": 704
+  },
+  {
+    "id": 1782836182585.7937,
+    "name": "ARRO BREAK SHOE H.H REAR",
+    "sku": "SKU-ARRO-BREAK-SHOE",
+    "unit": "Pcs",
+    "stock": 160,
+    "price": 95,
+    "mrp": 95,
+    "purchasePrice": 95,
+    "discount": 0
+  },
+  {
+    "id": 1782836182585.3738,
+    "name": "SAKTI GOLD TUBE 2-75-18",
+    "sku": "SKU-SAKTI-GOLD-TUBE",
+    "unit": "Pcs",
+    "stock": 230,
+    "price": 170,
+    "mrp": 170,
+    "purchasePrice": 136
+  },
+  {
+    "id": 1782836182585.3323,
+    "name": "DIKKY BLACK",
+    "sku": "SKU-DIKKY-BLACK",
+    "unit": "Pcs",
+    "stock": 170,
+    "price": 490,
+    "mrp": 735,
+    "purchasePrice": 392
+  },
+  {
+    "id": 1782836182585.4832,
+    "name": "BAG",
+    "sku": "SKU-BAG",
+    "unit": "Pcs",
+    "stock": 140,
+    "price": 310,
+    "mrp": 310,
+    "purchasePrice": 310,
+    "discount": 0
+  },
+  {
+    "id": 1782836182585.8008,
+    "name": "ALLOYWHEEL DLX REAR SMALL HUB",
+    "sku": "SKU-ALLOY-HUB",
+    "unit": "Pcs",
+    "stock": 224,
+    "price": 3410,
+    "mrp": 3720,
+    "purchasePrice": 3100,
+    "discount": 0
+  },
+  {
+    "id": 1782836182585.1545,
+    "name": "INDICATOR (VNI TECH",
+    "sku": "SKU-INDICATOR-VNI",
+    "unit": "Pcs",
+    "stock": 50,
+    "price": 130,
+    "mrp": 215,
+    "purchasePrice": 104
+  },
+  {
+    "id": 1782836182585.8945,
+    "name": "MUDGUARD SPL+ REAR",
+    "sku": "SKU-MUDGUARD-REAR",
+    "unit": "Pcs",
+    "stock": 274,
+    "price": 234,
+    "mrp": 360,
+    "purchasePrice": 187.20000000000002
+  },
+  {
+    "id": 1782836182585.3647,
+    "name": "MIRROR ACTIVA LUMAX",
+    "sku": "SKU-MIRROR-ACTIVA",
+    "unit": "Pcs",
+    "stock": 40,
+    "price": 128,
+    "mrp": 165,
+    "purchasePrice": 102.4
+  },
+  {
+    "id": 1782836182585.7812,
+    "name": "ACTIVA BREAK SHOE ASK",
+    "sku": "SKU-ACTIVA-SHOES",
+    "unit": "Pcs",
+    "stock": 100,
+    "price": 130,
+    "mrp": 130,
+    "purchasePrice": 104
+  },
+  {
+    "id": 1782836182585.6292,
+    "name": "FOOTREST ITEN",
+    "sku": "SKU-FOOTREST-ITEN",
+    "unit": "Pcs",
+    "stock": 190,
+    "price": 60,
+    "mrp": 90,
+    "purchasePrice": 48
+  },
+  {
+    "id": 1782836182585.82,
+    "name": "BAZAR RED",
+    "sku": "SKU-BAZAR-RED",
+    "unit": "Pcs",
+    "stock": 40,
+    "price": 60,
+    "mrp": 60,
+    "purchasePrice": 48
+  },
+  {
+    "id": 1782836182585.938,
+    "name": "USHA BLOCK H.H",
+    "sku": "SKU-USHA-BLOCK",
+    "unit": "Pcs",
+    "stock": 255,
+    "price": 1566,
+    "mrp": 2083,
+    "purchasePrice": 1252.8000000000002
+  },
+  {
+    "id": 1782836182585.9092,
+    "name": "SOCER ROD PASSION PRO (OR)",
+    "sku": "SKU-SOCER-ROD-PP",
+    "unit": "Pcs",
+    "stock": 295,
+    "price": 854,
+    "mrp": 940,
+    "purchasePrice": 683.2
+  },
+  {
+    "id": 1782836182585.8792,
+    "name": "CLUTCH LEVER BREAK LEVER",
+    "sku": "SKU-CLUTCH-LEVER",
+    "unit": "Pcs",
+    "stock": 250,
+    "price": 45,
+    "mrp": 45,
+    "purchasePrice": 45,
+    "discount": 0
+  },
+  {
+    "id": 1782836182585.2754,
+    "name": "INJECTOR ACTIVA BS6",
+    "sku": "SKU-INJECTOR-ACTIVA",
+    "unit": "Pcs",
+    "stock": 190,
+    "price": 768,
+    "mrp": 960,
+    "purchasePrice": 614.4000000000001
+  },
+  {
+    "id": 1782836182585.452,
+    "name": "SOCER ROD HF DLX",
+    "sku": "SKU-SOCER-ROD-HFD",
+    "unit": "Pcs",
+    "stock": 310,
+    "price": 681,
+    "mrp": 839,
+    "purchasePrice": 544.8000000000001
+  },
+  {
+    "id": 1782836182585.222,
+    "name": "FULL PACKING HF DLX",
+    "sku": "SKU-PACKING-HFD",
+    "unit": "Pcs",
+    "stock": 50,
+    "price": 290,
+    "mrp": 290,
+    "purchasePrice": 210,
+    "discount": 28
+  },
+  {
+    "id": 1782836182585.8628,
+    "name": "FULL PACKING SPL+ BS6",
+    "sku": "SKU-PACKING-SPL",
+    "unit": "Pcs",
+    "stock": 25,
+    "price": 157,
+    "mrp": 210,
+    "purchasePrice": 125.60000000000001
+  },
+  {
+    "id": 1782836182586.9734,
+    "name": "MAGNET PACKING DLX BS6",
+    "sku": "SKU-MAGNET-DLX",
+    "unit": "Pcs",
+    "stock": 50,
+    "price": 20,
+    "mrp": 26,
+    "purchasePrice": 16
+  },
+  {
+    "id": 1782836182586.3616,
+    "name": "CHAIN COVER TAKKAN",
+    "sku": "SKU-CHAIN-COVER",
+    "unit": "Pcs",
+    "stock": 500,
+    "price": 4.4,
+    "mrp": 5,
+    "purchasePrice": 4,
+    "discount": 0
+  },
+  {
+    "id": 1782836182586.383,
+    "name": "ARRO SACOF BUSH ACTIVA",
+    "sku": "SKU-ARRO-BUSH",
+    "unit": "Pcs",
+    "stock": 280,
+    "price": 237,
+    "mrp": 330,
+    "purchasePrice": 189.60000000000002
+  },
+  {
+    "id": 1782836182586.6562,
+    "name": "OIL FILTER (V) SHINE BS6",
+    "sku": "SKU-OIL-FILTER-BS6",
+    "unit": "Pcs",
+    "stock": 50,
+    "price": 63,
+    "mrp": 69,
+    "purchasePrice": 57.27,
+    "discount": 17
+  },
+  {
+    "id": 1782836182586.9692,
+    "name": "HEEERO 4T",
+    "sku": "SKU-HEEERO-4T",
+    "unit": "Pcs",
+    "stock": 263,
+    "price": 160,
+    "mrp": 160,
+    "purchasePrice": 128
+  },
+  {
+    "id": 1782836182586.1355,
+    "name": "SOCER OIL",
+    "sku": "SKU-SOCER-OIL",
+    "unit": "Pcs",
+    "stock": 40,
+    "price": 30,
+    "mrp": 30,
+    "purchasePrice": 24
+  },
+  {
+    "id": 1782836182586.7393,
+    "name": "SOCER OIL SEAL",
+    "sku": "SKU-SOCER-OIL-SEAL",
+    "unit": "Pcs",
+    "stock": 40,
+    "price": 40,
+    "mrp": 40,
+    "purchasePrice": 32
+  },
+  {
+    "id": 1782836182586.3154,
+    "name": "CHAIN SPRY (OXCE) SMALL",
+    "sku": "SKU-CHAIN-SPRY-SMALL",
+    "unit": "Pcs",
+    "stock": 315,
+    "price": 100,
+    "mrp": 100,
+    "purchasePrice": 80
+  },
+  {
+    "id": 1782836182586.2666,
+    "name": "SELF BENDEX (LUCAS)",
+    "sku": "SKU-LUCAS-BENDEX",
+    "unit": "Pcs",
+    "stock": 295,
+    "price": 499,
+    "mrp": 609,
+    "purchasePrice": 399.20000000000005
+  },
+  {
+    "id": 1782836182586.614,
+    "name": "MAGNET COIL 2 HOLE V",
+    "sku": "SKU-MAGNET-COIL-V",
+    "unit": "Pcs",
+    "stock": 215,
+    "price": 815,
+    "mrp": 995,
+    "purchasePrice": 652
+  },
+  {
+    "id": 1782836182586.469,
+    "name": "ARRO CLUTCH CAMBO CD DLX",
+    "sku": "SKU-ARRO-CAMBO-DLX",
+    "unit": "Pcs",
+    "stock": 150,
+    "price": 350,
+    "mrp": 504,
+    "purchasePrice": 280
+  },
+  {
+    "id": 1782836182586.7654,
+    "name": "INDI YANGO SPL+",
+    "sku": "SKU-INDI-YANGO-SPL",
+    "unit": "Pcs",
+    "stock": 170,
+    "price": 151,
+    "mrp": 244,
+    "purchasePrice": 120.80000000000001
+  },
+  {
+    "id": 1782836182586.3171,
+    "name": "INDICATOR I-TEN HF DLX",
+    "sku": "SKU-INDICATOR-ITEN-DLX",
+    "unit": "Pcs",
+    "stock": 195,
+    "price": 90,
+    "mrp": 160,
+    "purchasePrice": 72
+  },
+  {
+    "id": 1782836182586.9614,
+    "name": "ARRO HANDAL RUBBER",
+    "sku": "SKU-ARRO-HANDAL-RUBBER",
+    "unit": "Pcs",
+    "stock": 415,
+    "price": 15,
+    "mrp": 23,
+    "purchasePrice": 12
+  },
+  {
+    "id": 1782836182586.7449,
+    "name": "POWER ZONE 2.5LB",
+    "sku": "SKU-POWER-ZONE-2.5LB",
+    "unit": "Pcs",
+    "stock": 200,
+    "price": 640,
+    "mrp": 640,
+    "purchasePrice": 512
+  },
+  {
+    "id": 1782836182586.9495,
+    "name": "RALCO TYRE 2-75-18 F.",
+    "sku": "SKU-RALCO-TYRE-2-75-18-F",
+    "unit": "Pcs",
+    "stock": 179,
+    "price": 1380,
+    "mrp": 1380,
+    "purchasePrice": 1150,
+    "discount": 0
+  },
+  {
+    "id": 1782836182586.923,
+    "name": "SJR 2-75-18 F.",
+    "sku": "SKU-SJR-TYRE-2-75-18-F",
+    "unit": "Pcs",
+    "stock": 215,
+    "price": 1170,
+    "mrp": 1404,
+    "purchasePrice": 936
+  },
+  {
+    "id": 1782836182586.8906,
+    "name": "TANKI COVER",
+    "sku": "SKU-TANKI-COVER",
+    "unit": "Pcs",
+    "stock": 305,
+    "price": 43,
+    "mrp": 51.6,
+    "purchasePrice": 108
+  },
+  {
+    "id": 1782836182586.9106,
+    "name": "KICHAD PATTI CLIP",
+    "sku": "SKU-KICHAD-PATTI-CLIP",
+    "unit": "Pcs",
+    "stock": 905,
+    "price": 5,
+    "mrp": 5,
+    "purchasePrice": 5,
+    "discount": 0
+  }
+]

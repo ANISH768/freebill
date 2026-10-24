@@ -1,0 +1,24 @@
+{
+  "short_name": "BillSync Pro",
+  "name": "BillSync Pro - Offline Billing & Multi-Device Sync",
+  "description": "An offline-first enterprise billing, estimate, customer ledger, and inventory management application with secure multi-device synchronization.",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/color/192/000000/bill.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://img.icons8.com/color/512/000000/bill.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "any"
+}
