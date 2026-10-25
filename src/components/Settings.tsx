@@ -25,7 +25,8 @@ import {
   Sparkles,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  Download
 } from 'lucide-react';
 import { 
   AppSettings, 
@@ -116,13 +117,19 @@ export default function Settings({
 
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync state if currentUser changes
+  // Sync state if currentUser changes or when settings are updated from Billing screen
   useEffect(() => {
     const s = getSavedAppSettings(currentUser || undefined);
     setSettings(s);
     const p = getSavedPrintConfig(businessName, currentUser || undefined);
     setPrintConfig(p);
     setLogoPreview(p.logoUrl || s.logoUrl || '');
+
+    const handleSettingsUpdated = () => {
+      setSettings(getSavedAppSettings(currentUser || undefined));
+    };
+    window.addEventListener('app_settings_updated', handleSettingsUpdated);
+    return () => window.removeEventListener('app_settings_updated', handleSettingsUpdated);
   }, [businessName, currentUser]);
 
   // Handle Logo Upload (read as Base64 data URL)
@@ -1256,6 +1263,93 @@ export default function Settings({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Local Downloads Folder Auto-Save Toggle for Saved_Bills_Data.json */}
+          <div className="bg-slate-50 dark:bg-slate-800/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4 max-w-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Auto-Save <span className="font-mono">Saved_Bills_Data.json</span> to Downloads Folder
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Automatically downloads the updated <span className="font-mono font-bold text-slate-700 dark:text-slate-200">Saved_Bills_Data.json</span> archive to your local Downloads folder every time a bill is saved, simplifying external archival and full restoration.
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.autoBackup.autoDownloadBillFile)}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    const updated = {
+                      ...settings,
+                      autoBackup: { ...settings.autoBackup, autoDownloadBillFile: enabled }
+                    };
+                    setSettings(updated);
+                    saveAppSettings(updated, currentUser || undefined);
+                    onShowToast(
+                      enabled
+                        ? 'Auto-Download Saved_Bills_Data.json to Downloads folder enabled!'
+                        : 'Auto-Download Saved_Bills_Data.json disabled'
+                    );
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                File Name in Downloads: <span className="font-mono font-bold text-slate-800 dark:text-slate-200">Saved_Bills_Data.json</span>
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    let payloadToDownload: any = null;
+                    const localRaw = localStorage.getItem('saved_bills_file_data');
+                    if (localRaw) {
+                      payloadToDownload = JSON.parse(localRaw);
+                    } else {
+                      const res = await fetch('/api/saved-bills-file');
+                      if (res.ok) {
+                        const data = await res.json();
+                        payloadToDownload = data.file;
+                      }
+                    }
+                    if (!payloadToDownload) {
+                      payloadToDownload = {
+                        fileName: 'Saved_Bills_Data.json',
+                        businessName,
+                        updatedAt: new Date().toISOString(),
+                        estimates
+                      };
+                    }
+                    const blob = new Blob([JSON.stringify(payloadToDownload, null, 2)], {
+                      type: 'application/json'
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'Saved_Bills_Data.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    onShowToast('Saved_Bills_Data.json downloaded to your Downloads folder!');
+                  } catch {
+                    onShowToast('Failed to download Saved_Bills_Data.json');
+                  }
+                }}
+                className="px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Download Saved_Bills_Data.json Now</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

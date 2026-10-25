@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to disable automatic product detail auto-fill while typing in the billing item input and populate all product details (Name, HSN/SKU, Unit, MRP, Rate, Discount) only when the user selects a recommended product and presses Enter (or clicks it), then focus the Qty field of the same row.",
-  "updatedAt":  "2026-10-22T12:19:55.410809361Z",
+  "summary":  "Implementation plan for adding a synchronized Settings toggle (in Settings > Auto-Backup & Sync and on the Billing screen) that automatically downloads Saved_Bills_Data.json to the user's Downloads folder every time a bill is saved.",
+  "updatedAt":  "2026-10-25T16:06:34.509230920Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

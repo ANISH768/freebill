@@ -25,6 +25,7 @@ interface BackupProps {
   onForceDownload?: () => void;
   onRunHealthCheck?: () => { issuesFound: number; fixedDetails: string[] };
   onOpenPrintCustomizer?: () => void;
+  onOpenFileImport?: () => void;
 }
 
 interface ParsedBackupSummary {
@@ -50,7 +51,8 @@ export default function Backup({
   onForceUpload,
   onForceDownload,
   onRunHealthCheck,
-  onOpenPrintCustomizer
+  onOpenPrintCustomizer,
+  onOpenFileImport
 }: BackupProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -959,6 +961,34 @@ export default function Backup({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ----------------- PROJECT FILES DATA LOADER BANNER ----------------- */}
+      {onOpenFileImport && (
+        <div className="bg-gradient-to-r from-teal-900 via-emerald-900 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-teal-700/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 font-sans">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="bg-emerald-400/20 text-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider border border-emerald-400/30">
+                📂 Saved Project Files Data
+              </span>
+              <span className="text-[11px] font-bold text-emerald-200/80">प्रोजेक्ट फ़ाइलों में मौजूद डेटा जोड़ें</span>
+            </div>
+            <h3 className="font-extrabold text-base text-white">
+              Add Data from Saved Project Files (फ़ाइलों का डेटा 1-Click में जोड़ें)
+            </h3>
+            <p className="text-[11px] text-emerald-100/85 font-medium leading-relaxed">
+              आपके सिस्टम/फ़ाइलों में मौजूद ऑटो पार्ट्स प्रोडक्ट्स (`products_part1/2.json`, `user_real_data.json`), ग्राहक (`clients_restore.json`) और बिल (`estimates_part1/2.json`) को सीधे अपने अकाउंट में जोड़ें (Merge या Replace करें)।
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenFileImport}
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-5 py-3 rounded-xl text-xs transition-all shadow-lg flex items-center space-x-2 cursor-pointer whitespace-nowrap active:scale-95"
+          >
+            <span>📂</span>
+            <span>Open File Data Loader (फ़ाइल डेटा जोड़ें)</span>
+          </button>
         </div>
       )}
 

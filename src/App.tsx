@@ -14,6 +14,7 @@ import PrintCustomizer from './components/PrintCustomizer';
 import Settings from './components/Settings';
 import CounterLockScreen from './components/CounterLockScreen';
 import KeyboardShortcutModal from './components/KeyboardShortcutModal';
+import FileDataImportModal from './components/FileDataImportModal';
 import { ConfirmModalHost } from './components/ConfirmModalHost';
 import { requestConfirm } from './utils/confirmModal';
 import { 
@@ -25,7 +26,7 @@ import {
 } from './utils/appSettings';
 import { getSavedPrintConfig } from './utils/printConfig';
 import { t, getSavedLanguage, SupportedLanguage } from './utils/i18n';
-import { Shield, LayoutDashboard, FileSpreadsheet, Layers, Users, Landmark, Database, UserCheck, LogOut, CheckCircle, ChevronLeft, ChevronRight, Lock, Unlock, Printer, Settings as SettingsIcon, Moon, Sun, Globe2, Keyboard } from 'lucide-react';
+import { Shield, LayoutDashboard, FileSpreadsheet, Layers, Users, Landmark, Database, UserCheck, LogOut, CheckCircle, ChevronLeft, ChevronRight, Lock, Unlock, Printer, Settings as SettingsIcon, Moon, Sun, Globe2, Keyboard, FolderOpen } from 'lucide-react';
 import { safeStorage, saveUserIsolatedData, getUserIsolatedData, addToOfflineSyncQueue, getOfflineSyncQueue, removeFromOfflineSyncQueue, clearOfflineSyncQueue } from './utils/storage';
 import { requestPersistentStorage } from './utils/crypto';
 import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigured, subscribeToUserFirestoreSync } from './db/firebase';
@@ -558,6 +559,7 @@ export default function App() {
   }, []);
 
   const [showShortcutGuideModal, setShowShortcutGuideModal] = useState<boolean>(false);
+  const [showFileDataImportModal, setShowFileDataImportModal] = useState<boolean>(false);
 
   const handleTriggerShortcutAction = (actionId: string) => {
     if (actionId === 'new_bill') {
@@ -2791,9 +2793,54 @@ export default function App() {
 
     registerLocalMutation();
 
+    // Automatically save bill data into a dedicated file (Saved_Bills_Data.json)
+    try {
+      const billFilePayload = {
+        fileName: 'Saved_Bills_Data.json',
+        businessName,
+        lastSavedBillSerial: payload.serial,
+        updatedAt: new Date().toISOString(),
+        clients: dbClients,
+        products: updatedProductsList,
+        estimates: updatedEstimates,
+        stockLogs: updatedLogs
+      };
+      safeStorage.setItem('saved_bills_file_data', JSON.stringify(billFilePayload));
+
+      fetch('/api/save-bill-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bill: payload,
+          estimates: updatedEstimates,
+          clients: dbClients,
+          products: updatedProductsList,
+          stockLogs: updatedLogs,
+          businessName
+        })
+      }).catch(() => {});
+
+      const currentAppSettings = getSavedAppSettings(currentUser || undefined);
+      const shouldAutoDownload =
+        Boolean(currentAppSettings.autoBackup?.autoDownloadBillFile) ||
+        safeStorage.getItem('auto_download_bill_file') === 'true';
+
+      if (shouldAutoDownload) {
+        const blob = new Blob([JSON.stringify(billFilePayload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Saved_Bills_Data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {}
+
     // Immediately update UI / open Print Dialog BEFORE awaiting network sync so F3 is instant
     setEditingEstimateId(null);
-    showToast(`Bill ${payload.serial} saved successfully!`);
+    showToast(`Bill ${payload.serial} saved in Saved_Bills_Data.json!`);
 
     if (openPrint) {
       setAutoTriggerPrintOnOpen(true);
@@ -3297,9 +3344,9 @@ export default function App() {
             const existing = finalClients[matchedIdx];
             finalClients[matchedIdx] = {
               ...existing,
-              address: imp.address || existing.address,
-              gstin: imp.gstin || existing.gstin,
-              stateCode: imp.stateCode || existing.stateCode
+              address: imp.address || existing.address || '',
+              gstin: imp.gstin || existing.gstin || '',
+              stateCode: imp.stateCode || existing.stateCode || ''
             };
           } else {
             const idExists = finalClients.some(c => c.id === imp.id);
@@ -3325,8 +3372,8 @@ export default function App() {
               stock: existing.stock + (Number(imp.stock) || 0),
               price: imp.price > 0 ? imp.price : existing.price,
               mrp: imp.mrp > 0 ? imp.mrp : existing.mrp,
-              purchasePrice: imp.purchasePrice && imp.purchasePrice > 0 ? imp.purchasePrice : existing.purchasePrice,
-              discount: imp.discount !== undefined ? imp.discount : existing.discount
+              purchasePrice: (imp.purchasePrice && imp.purchasePrice > 0 ? imp.purchasePrice : existing.purchasePrice) || 0,
+              discount: (imp.discount !== undefined ? imp.discount : existing.discount) || 0
             };
           } else {
             const idExists = finalProducts.some(p => p.id === imp.id);
@@ -3552,6 +3599,15 @@ export default function App() {
               ) : (
                 <Moon className="w-4 h-4 text-indigo-300" />
               )}
+            </button>
+
+            {/* Quick Add File Data trigger */}
+            <button
+              onClick={() => setShowFileDataImportModal(true)}
+              className="p-2 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 rounded-xl cursor-pointer text-xs"
+              title="Add Data from Files (फ़ाइल डेटा जोड़ें)"
+            >
+              📂
             </button>
 
             {/* Quick Backup trigger */}
@@ -3832,6 +3888,7 @@ export default function App() {
               costFallbackPct={costFallbackPct}
               onUpdateCostFallbackPct={handleUpdateCostFallbackPct}
               userRole={currentUserRole}
+              onOpenFileImport={() => setShowFileDataImportModal(true)}
             />
           )}
 
@@ -3853,6 +3910,7 @@ export default function App() {
               }}
               onDeleteEstimate={handleDeleteEstimate}
               userRole={currentUserRole}
+              onOpenFileImport={() => setShowFileDataImportModal(true)}
             />
           )}
 
@@ -3893,6 +3951,7 @@ export default function App() {
                 onForceUpload={() => handleResolveConflict('local')}
                 onForceDownload={() => handleResolveConflict('server')}
                 onOpenPrintCustomizer={() => navigateToTab('print_customizer')}
+                onOpenFileImport={() => setShowFileDataImportModal(true)}
               />
             </div>
           )}
@@ -4235,6 +4294,12 @@ export default function App() {
           onClose={() => setShowShortcutGuideModal(false)}
           onTriggerShortcut={handleTriggerShortcutAction}
         />
+        <FileDataImportModal
+          isOpen={showFileDataImportModal}
+          onClose={() => setShowFileDataImportModal(false)}
+          onImportData={handleImportBackupRestore}
+          currentUsers={dbUsers}
+        />
 
         <ConfirmModalHost />
       </div>
@@ -4251,6 +4316,12 @@ export default function App() {
         isOpen={showShortcutGuideModal}
         onClose={() => setShowShortcutGuideModal(false)}
         onTriggerShortcut={handleTriggerShortcutAction}
+      />
+      <FileDataImportModal
+        isOpen={showFileDataImportModal}
+        onClose={() => setShowFileDataImportModal(false)}
+        onImportData={handleImportBackupRestore}
+        currentUsers={dbUsers}
       />
       
       {/* ----------------- RETAIL COUNTER AUTO-LOCK OVERLAY ----------------- */}
@@ -4465,6 +4536,19 @@ export default function App() {
             )}
 
             <button
+              onClick={() => setShowFileDataImportModal(true)}
+              className={`flex items-center rounded-xl font-bold hover:bg-emerald-950/50 hover:text-emerald-300 text-emerald-400 transition-all text-left cursor-pointer ${
+                isSidebarMinimized 
+                  ? 'justify-center p-3 w-12 h-12 text-center' 
+                  : 'w-full space-x-3 px-4 py-3'
+              }`}
+              title="Add Data from Project or Local Files (फ़ाइल डेटा जोड़ें)"
+            >
+              <FolderOpen className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+              {!isSidebarMinimized && <span>Add File Data</span>}
+            </button>
+
+            <button
               onClick={() => setShowShortcutGuideModal(true)}
               className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white text-slate-400 transition-all text-left cursor-pointer ${
                 isSidebarMinimized 
@@ -4546,8 +4630,19 @@ export default function App() {
             </p>
           </div>
           
-          {/* Top Actions: Keyboard Shortcuts, Dark Mode, Quick Lock, Settings, & Cloud Status */}
+          {/* Top Actions: Add File Data, Keyboard Shortcuts, Dark Mode, Quick Lock, Settings, & Cloud Status */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Add Data from Files Button */}
+            <button
+              type="button"
+              onClick={() => setShowFileDataImportModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white border border-teal-600 rounded-full text-[11px] font-black shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Add Data from Project or Local Files (फ़ाइल डेटा जोड़ें)"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-teal-100" />
+              <span>📂 Add File Data (फ़ाइल डेटा जोड़ें)</span>
+            </button>
+
             {/* Keyboard Shortcut Guide Trigger (F1) */}
             <button
               type="button"
@@ -4738,6 +4833,7 @@ export default function App() {
             costFallbackPct={costFallbackPct}
             onUpdateCostFallbackPct={handleUpdateCostFallbackPct}
             userRole={currentUserRole}
+            onOpenFileImport={() => setShowFileDataImportModal(true)}
           />
         )}
 
@@ -4762,6 +4858,7 @@ export default function App() {
             }}
             onDeleteEstimate={handleDeleteEstimate}
             userRole={currentUserRole}
+            onOpenFileImport={() => setShowFileDataImportModal(true)}
           />
         )}
 
@@ -4828,6 +4925,7 @@ export default function App() {
               return { issuesFound: issues, fixedDetails: details };
             }}
             onOpenPrintCustomizer={() => navigateToTab('print_customizer')}
+            onOpenFileImport={() => setShowFileDataImportModal(true)}
           />
         )}
 

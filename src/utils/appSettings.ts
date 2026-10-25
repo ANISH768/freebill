@@ -99,6 +99,7 @@ export interface AppSettings {
     enabled: boolean;
     intervalMinutes: number;
     lastBackupTime?: string;
+    autoDownloadBillFile?: boolean;
   };
   notifications: {
     soundOnBilling: boolean;
@@ -118,7 +119,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   taxRegion: TAX_REGION_PRESETS[0], // India GST default
   autoBackup: {
     enabled: true,
-    intervalMinutes: 15
+    intervalMinutes: 15,
+    autoDownloadBillFile: false
   },
   notifications: {
     soundOnBilling: true,
@@ -141,10 +143,15 @@ const SETTINGS_KEY = 'pos_unified_app_settings';
 export function getSavedAppSettings(userPhone?: string): AppSettings {
   const specificKey = userPhone ? `${SETTINGS_KEY}_${userPhone}` : SETTINGS_KEY;
   let savedThemePreference: boolean | null = null;
+  let savedAutoDownloadPref: boolean | null = null;
   try {
     const rawTheme = localStorage.getItem('theme');
     if (rawTheme === 'dark') savedThemePreference = true;
     else if (rawTheme === 'light') savedThemePreference = false;
+
+    const rawAutoDl = localStorage.getItem('auto_download_bill_file');
+    if (rawAutoDl === 'true') savedAutoDownloadPref = true;
+    else if (rawAutoDl === 'false') savedAutoDownloadPref = false;
   } catch (e) {}
 
   try {
@@ -162,6 +169,12 @@ export function getSavedAppSettings(userPhone?: string): AppSettings {
         : '';
 
       const isDarkMode = savedThemePreference !== null ? savedThemePreference : Boolean(parsed.darkMode);
+      const parsedAutoBackup = { ...DEFAULT_APP_SETTINGS.autoBackup, ...(parsed.autoBackup || {}) };
+      if (savedAutoDownloadPref !== null) {
+        parsedAutoBackup.autoDownloadBillFile = savedAutoDownloadPref;
+      } else {
+        parsedAutoBackup.autoDownloadBillFile = Boolean(parsedAutoBackup.autoDownloadBillFile);
+      }
 
       return {
         ...DEFAULT_APP_SETTINGS,
@@ -169,7 +182,7 @@ export function getSavedAppSettings(userPhone?: string): AppSettings {
         darkMode: isDarkMode,
         currency: parsed.currency || DEFAULT_APP_SETTINGS.currency,
         taxRegion: parsed.taxRegion || DEFAULT_APP_SETTINGS.taxRegion,
-        autoBackup: { ...DEFAULT_APP_SETTINGS.autoBackup, ...(parsed.autoBackup || {}) },
+        autoBackup: parsedAutoBackup,
         notifications: { ...DEFAULT_APP_SETTINGS.notifications, ...(parsed.notifications || {}) },
         counterLock: {
           ...DEFAULT_APP_SETTINGS.counterLock,
@@ -185,6 +198,10 @@ export function getSavedAppSettings(userPhone?: string): AppSettings {
   return {
     ...DEFAULT_APP_SETTINGS,
     darkMode: savedThemePreference !== null ? savedThemePreference : DEFAULT_APP_SETTINGS.darkMode,
+    autoBackup: {
+      ...DEFAULT_APP_SETTINGS.autoBackup,
+      autoDownloadBillFile: savedAutoDownloadPref !== null ? savedAutoDownloadPref : false
+    },
     counterLock: {
       ...DEFAULT_APP_SETTINGS.counterLock,
       recoveryPhone: userPhone || ''
@@ -201,6 +218,11 @@ export function saveAppSettings(settings: AppSettings, userPhone?: string): void
     }
     // Bind theme state with localStorage ('theme')
     localStorage.setItem('theme', settings.darkMode ? 'dark' : 'light');
+    // Bind autoDownloadBillFile with localStorage ('auto_download_bill_file')
+    localStorage.setItem(
+      'auto_download_bill_file',
+      settings.autoBackup?.autoDownloadBillFile ? 'true' : 'false'
+    );
     // Apply dark mode immediately to HTML document
     applyDarkModeToDocument(settings.darkMode);
     // Broadcast setting change event

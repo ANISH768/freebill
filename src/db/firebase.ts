@@ -64,6 +64,37 @@ export interface CloudSyncPayload {
 }
 
 /**
+ * Recursively strips `undefined` properties and normalizes non-finite numbers
+ * so Firestore `setDoc()` never throws "Unsupported field value: undefined".
+ */
+function sanitizeForFirestore<T>(value: T): T {
+  if (value === undefined) {
+    return null as unknown as T;
+  }
+  if (value === null) {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return (Number.isFinite(value) ? value : 0) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v !== undefined) {
+        cleaned[k] = sanitizeForFirestore(v);
+      }
+    }
+    return cleaned as T;
+  }
+  return value;
+}
+
+/**
  * Upload active user counter data directly to Firebase Firestore
  */
 export async function pushUserSyncToFirestore(phone: string, payload: CloudSyncPayload): Promise<boolean> {
@@ -76,12 +107,12 @@ export async function pushUserSyncToFirestore(phone: string, payload: CloudSyncP
     const dataToSave = {
       phone: cleanPhone,
       businessName: payload.businessName || 'My Counter',
-      clients: Array.isArray(payload.clients) ? payload.clients : [],
-      products: Array.isArray(payload.products) ? payload.products : [],
-      estimates: Array.isArray(payload.estimates) ? payload.estimates : [],
-      stockLogs: Array.isArray(payload.stockLogs) ? payload.stockLogs : [],
-      costFallbackPct: payload.costFallbackPct || 80,
-      last_synced_millis: payload.last_synced_millis || Date.now(),
+      clients: sanitizeForFirestore(Array.isArray(payload.clients) ? payload.clients : []),
+      products: sanitizeForFirestore(Array.isArray(payload.products) ? payload.products : []),
+      estimates: sanitizeForFirestore(Array.isArray(payload.estimates) ? payload.estimates : []),
+      stockLogs: sanitizeForFirestore(Array.isArray(payload.stockLogs) ? payload.stockLogs : []),
+      costFallbackPct: Number.isFinite(Number(payload.costFallbackPct)) ? Number(payload.costFallbackPct) : 80,
+      last_synced_millis: Number.isFinite(Number(payload.last_synced_millis)) ? Number(payload.last_synced_millis) : Date.now(),
       updatedAt: new Date().toISOString(),
       serverTimestamp: serverTimestamp()
     };
@@ -190,7 +221,7 @@ export async function pushAuditLogToFirestore(entry: {
     const db = getFirebaseDb();
     const docRef = doc(db, 'audit_logs', entry.logId);
     await setDoc(docRef, {
-      ...entry,
+      ...sanitizeForFirestore(entry),
       serverTimestamp: serverTimestamp()
     });
     return true;

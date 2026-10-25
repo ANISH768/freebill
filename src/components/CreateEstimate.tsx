@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import QRCode from 'qrcode';
 import { Client, Product, Estimate, InvoiceItem, SecondaryPrintStyle } from '../types';
 import { getSavedPrintConfig, savePrintConfig } from '../utils/printConfig';
-import { getSavedAppSettings, playBillingSuccessSound } from '../utils/appSettings';
+import { getSavedAppSettings, saveAppSettings, playBillingSuccessSound } from '../utils/appSettings';
 import { 
   Plus, 
   Trash, 
@@ -141,6 +141,28 @@ export default function CreateEstimate({
     }
   });
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
+  const [autoDownloadBillFile, setAutoDownloadBillFile] = useState<boolean>(() => {
+    try {
+      const saved = getSavedAppSettings();
+      if (saved.autoBackup?.autoDownloadBillFile !== undefined) {
+        return Boolean(saved.autoBackup.autoDownloadBillFile);
+      }
+      return localStorage.getItem('auto_download_bill_file') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleSyncSettings = () => {
+      try {
+        const s = getSavedAppSettings();
+        setAutoDownloadBillFile(Boolean(s.autoBackup?.autoDownloadBillFile));
+      } catch {}
+    };
+    window.addEventListener('app_settings_updated', handleSyncSettings);
+    return () => window.removeEventListener('app_settings_updated', handleSyncSettings);
+  }, []);
 
   useEffect(() => {
     if (!showPaymentQR && !includePaymentQR) {
@@ -2919,6 +2941,42 @@ export default function CreateEstimate({
             >
               Change Theme
             </button>
+          </div>
+
+          {/* Automatic Bill File Save Indicator & Download Option */}
+          <div className="flex items-center justify-between px-3 py-2 bg-emerald-50/80 rounded-xl text-xs border border-emerald-200">
+            <div className="flex items-center gap-1.5 text-emerald-900 min-w-0">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="text-[11px] font-bold truncate">
+                Auto-Save Bill in File: <span className="font-mono font-black">Saved_Bills_Data.json</span>
+              </span>
+            </div>
+            <label className="flex items-center gap-1.5 text-[10px] font-black text-emerald-800 cursor-pointer shrink-0 ml-2 select-none">
+              <input
+                type="checkbox"
+                checked={autoDownloadBillFile}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAutoDownloadBillFile(val);
+                  try {
+                    const currentSettings = getSavedAppSettings();
+                    saveAppSettings({
+                      ...currentSettings,
+                      autoBackup: {
+                        ...currentSettings.autoBackup,
+                        autoDownloadBillFile: val
+                      }
+                    });
+                  } catch {
+                    try {
+                      localStorage.setItem('auto_download_bill_file', val ? 'true' : 'false');
+                    } catch {}
+                  }
+                }}
+                className="w-3.5 h-3.5 rounded text-emerald-600 cursor-pointer focus:ring-0"
+              />
+              <span>Auto-Download File</span>
+            </label>
           </div>
 
           {/* Action Buttons: Save & Print vs Save Only */}

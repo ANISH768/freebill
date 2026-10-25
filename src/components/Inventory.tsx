@@ -89,6 +89,7 @@ interface InventoryProps {
   costFallbackPct: number;
   onUpdateCostFallbackPct: (pct: number) => void;
   userRole?: 'admin' | 'clerk';
+  onOpenFileImport?: () => void;
 }
 
 export default function Inventory({
@@ -105,7 +106,8 @@ export default function Inventory({
   stockLogs,
   costFallbackPct,
   onUpdateCostFallbackPct,
-  userRole = 'admin'
+  userRole = 'admin',
+  onOpenFileImport
 }: InventoryProps) {
   const [search, setSearch] = useState('');
 
@@ -565,6 +567,17 @@ export default function Inventory({
         </div>
 
         <div className="flex flex-wrap gap-2 w-full md:w-auto font-sans">
+          {onOpenFileImport && (
+            <button
+              type="button"
+              onClick={onOpenFileImport}
+              className="flex-1 md:flex-none justify-center bg-teal-600 hover:bg-teal-700 text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+              title="Add products & data from saved project files or local JSON/CSV file"
+            >
+              <span>📂</span>
+              <span>Add File Data (फ़ाइल डेटा जोड़ें)</span>
+            </button>
+          )}
           {userRole !== 'clerk' && (
             <button
               type="button"

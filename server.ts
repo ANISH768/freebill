@@ -139,6 +139,330 @@ async function startServer() {
     res.json({ status: "ok", message: "Server is online and ready for syncing!" });
   });
 
+  // Load and list all available data files in the project (/tmp and /public)
+  app.get("/api/project-files", (req, res) => {
+    try {
+      const readJsonSafe = (relPath: string): any => {
+        try {
+          const fullPath = path.join(process.cwd(), relPath);
+          if (fs.existsSync(fullPath)) {
+            return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+          }
+        } catch (e) {
+          console.warn("Could not read project file:", relPath, e);
+        }
+        return null;
+      };
+
+      const savedBillsFile = readJsonSafe("tmp/saved_bills_data.json") || readJsonSafe("public/Saved_Bills_Data.json") || {};
+      const userRealData = readJsonSafe("tmp/user_real_data.json") || {};
+      const clientsRestore = readJsonSafe("tmp/clients_restore.json") || [];
+      const productsPart1 = readJsonSafe("tmp/products_part1.json") || [];
+      const productsPart2 = readJsonSafe("tmp/products_part2.json") || [];
+      const estimatesPart1 = readJsonSafe("tmp/estimates_part1.json") || [];
+      const estimatesPart2 = readJsonSafe("tmp/estimates_part2.json") || [];
+      const completeBackup = readJsonSafe("public/BillSync_Complete_Backup.json") || {};
+
+      // Deduplicate helper for clients
+      const mergeClients = (...lists: any[][]) => {
+        const map = new Map<string, any>();
+        for (const list of lists) {
+          if (!Array.isArray(list)) continue;
+          for (const c of list) {
+            if (!c || !c.name) continue;
+            const cleanName = String(c.name).trim();
+            if (cleanName.includes("(Demo)")) continue;
+            const key = cleanName.toLowerCase();
+            if (!map.has(key)) {
+              map.set(key, { ...c, name: cleanName });
+            }
+          }
+        }
+        return Array.from(map.values());
+      };
+
+      // Deduplicate helper for products
+      const demoSkus = new Set([
+        "SKU-ULTRA", "SKU-AMBUJA", "SKU-BERGER", "SKU-BRICK", "SKU-TATA",
+        "SKU-SAND", "SKU-BIRLA", "SKU-PVC", "SKU-ASIAN", "SKU-SIKA", "SKU-KAJARIA"
+      ]);
+      const mergeProducts = (excludeDemo: boolean, ...lists: any[][]) => {
+        const map = new Map<string, any>();
+        for (const list of lists) {
+          if (!Array.isArray(list)) continue;
+          for (const p of list) {
+            if (!p || !p.name) continue;
+            if (excludeDemo && p.sku && demoSkus.has(String(p.sku).trim())) continue;
+            const cleanName = String(p.name).trim();
+            const key = cleanName.toLowerCase();
+            if (!map.has(key)) {
+              map.set(key, { ...p, name: cleanName });
+            } else {
+              const existing = map.get(key);
+              map.set(key, {
+                ...existing,
+                ...p,
+                name: cleanName,
+                stock: Math.max(Number(existing.stock) || 0, Number(p.stock) || 0),
+                mrp: Number(p.mrp) || Number(existing.mrp) || 0,
+                price: Number(p.price) || Number(existing.price) || 0,
+                purchasePrice: Number(p.purchasePrice) || Number(existing.purchasePrice) || 0
+              });
+            }
+          }
+        }
+        return Array.from(map.values());
+      };
+
+      // Deduplicate helper for estimates
+      const mergeEstimates = (...lists: any[][]) => {
+        const map = new Map<string, any>();
+        for (const list of lists) {
+          if (!Array.isArray(list)) continue;
+          for (const e of list) {
+            if (!e) continue;
+            const key = String(e.serial || e.id || Math.random()).trim();
+            map.set(key, e);
+          }
+        }
+        return Array.from(map.values());
+      };
+
+      const allAutoClients = mergeClients(savedBillsFile.clients || [], clientsRestore, userRealData.clients || []);
+      const allAutoProducts = mergeProducts(true, savedBillsFile.products || [], userRealData.products || [], productsPart1, productsPart2);
+      const allAutoEstimates = mergeEstimates(estimatesPart1, estimatesPart2, userRealData.estimates || [], savedBillsFile.estimates || []);
+
+      const files = [
+        {
+          id: "saved_bills_data",
+          title: "Saved Bills File (Saved_Bills_Data.json)",
+          fileName: "Saved_Bills_Data.json",
+          description: "जब भी नया बिल बनता है, उसका डेटा अपने आप इस फ़ाइल में सेव होता है।",
+          badge: "LIVE BILL FILE",
+          clients: Array.isArray(savedBillsFile.clients) ? savedBillsFile.clients : allAutoClients,
+          products: Array.isArray(savedBillsFile.products) ? savedBillsFile.products : allAutoProducts,
+          estimates: Array.isArray(savedBillsFile.estimates) && savedBillsFile.estimates.length > 0 ? savedBillsFile.estimates : allAutoEstimates
+        },
+        {
+          id: "all_auto_combined",
+          title: "All Saved Auto Parts Files (सभी फ़ाइलों का पूरा डेटा)",
+          fileName: "user_real_data + products_part1/2 + estimates_part1/2 + clients_restore",
+          description: "आपके सभी सेव किए गए ऑटो पार्ट्स प्रोडक्ट्स, ग्राहक (Parties) और पुराने बिल एक साथ।",
+          badge: "RECOMMENDED",
+          clients: allAutoClients,
+          products: allAutoProducts,
+          estimates: allAutoEstimates
+        },
+        {
+          id: "user_real_data",
+          title: "Main Business Data File (user_real_data.json)",
+          fileName: "tmp/user_real_data.json",
+          description: "मुख्य काउंटर डेटा फ़ाइल जिसमें प्रोडक्ट्स, पार्टियां और बिल शामिल हैं।",
+          badge: "FULL FILE",
+          clients: Array.isArray(userRealData.clients) ? userRealData.clients.filter((c: any) => c && !String(c.name || '').includes('(Demo)')) : [],
+          products: Array.isArray(userRealData.products) ? userRealData.products : [],
+          estimates: Array.isArray(userRealData.estimates) ? userRealData.estimates : []
+        },
+        {
+          id: "products_files",
+          title: "Saved Products Catalog (products_part1 & part2.json)",
+          fileName: "tmp/products_part1.json + products_part2.json",
+          description: "केवल सभी स्टॉक आइटम्स और प्रोडक्ट्स की रेट/MRP लिस्ट।",
+          badge: "PRODUCTS ONLY",
+          clients: [],
+          products: mergeProducts(true, userRealData.products || [], productsPart1, productsPart2),
+          estimates: []
+        },
+        {
+          id: "clients_restore",
+          title: "Saved Parties & Customers (clients_restore.json)",
+          fileName: "tmp/clients_restore.json",
+          description: "केवल सभी सेव किए गए ऑटो पार्ट्स ग्राहकों और पार्टियों की लिस्ट।",
+          badge: "PARTIES ONLY",
+          clients: allAutoClients,
+          products: [],
+          estimates: []
+        },
+        {
+          id: "estimates_files",
+          title: "Saved Bills & Estimates (estimates_part1 & part2.json)",
+          fileName: "tmp/estimates_part1.json + estimates_part2.json",
+          description: "केवल सभी सेव किए गए पुराने एस्टीमेट और बिल (EST-001 से BILL-2026 तक)।",
+          badge: "BILLS ONLY",
+          clients: [],
+          products: [],
+          estimates: allAutoEstimates
+        },
+        {
+          id: "complete_backup_public",
+          title: "Complete Backup Sample File (BillSync_Complete_Backup.json)",
+          fileName: "public/BillSync_Complete_Backup.json",
+          description: "पब्लिक फोल्डर में मौजूद बैकअप फ़ाइल (72 बिल, 11 प्रोडक्ट्स, 10 ग्राहक)।",
+          badge: "PUBLIC FILE",
+          clients: Array.isArray(completeBackup.clients) ? completeBackup.clients : [],
+          products: Array.isArray(completeBackup.products) ? completeBackup.products : [],
+          estimates: Array.isArray(completeBackup.estimates) ? completeBackup.estimates : []
+        }
+      ];
+
+      res.json({ success: true, files });
+    } catch (err: any) {
+      console.error("Error loading project files:", err);
+      res.status(500).json({ error: "Failed to read project data files." });
+    }
+  });
+
+  // Automatically save created/updated bill data into a dedicated file (Saved_Bills_Data.json & tmp/saved_bills_data.json)
+  app.post("/api/save-bill-file", (req, res) => {
+    try {
+      const { bill, estimates, clients, products, stockLogs, businessName } = req.body || {};
+      const tmpDir = path.join(process.cwd(), "tmp");
+      const publicDir = path.join(process.cwd(), "public");
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      if (!fs.existsSync(publicDir)) {
+        fs.mkdirSync(publicDir, { recursive: true });
+      }
+
+      const savedBillsPath = path.join(tmpDir, "saved_bills_data.json");
+      const publicSavedBillsPath = path.join(publicDir, "Saved_Bills_Data.json");
+
+      let existingData: any = { clients: [], products: [], estimates: [], stockLogs: [] };
+      if (fs.existsSync(savedBillsPath)) {
+        try {
+          existingData = JSON.parse(fs.readFileSync(savedBillsPath, "utf-8"));
+        } catch {}
+      }
+
+      let updatedEstimates = Array.isArray(estimates)
+        ? estimates
+        : Array.isArray(existingData.estimates)
+        ? [...existingData.estimates]
+        : [];
+
+      if (bill && bill.serial) {
+        const idx = updatedEstimates.findIndex(
+          (e: any) => e && String(e.serial).trim().toLowerCase() === String(bill.serial).trim().toLowerCase()
+        );
+        if (idx >= 0) {
+          updatedEstimates[idx] = bill;
+        } else {
+          updatedEstimates.push(bill);
+        }
+      }
+
+      const filePayload = {
+        fileName: "Saved_Bills_Data.json",
+        businessName: businessName || existingData.businessName || "BillSync Pro",
+        lastSavedBillSerial: bill?.serial || existingData.lastSavedBillSerial || "",
+        updatedAt: new Date().toISOString(),
+        clients: Array.isArray(clients) ? clients : existingData.clients || [],
+        products: Array.isArray(products) ? products : existingData.products || [],
+        estimates: updatedEstimates,
+        stockLogs: Array.isArray(stockLogs) ? stockLogs : existingData.stockLogs || []
+      };
+
+      const jsonContent = JSON.stringify(filePayload, null, 2);
+      fs.writeFileSync(savedBillsPath, jsonContent, "utf-8");
+      fs.writeFileSync(publicSavedBillsPath, jsonContent, "utf-8");
+
+      res.json({
+        success: true,
+        fileName: "Saved_Bills_Data.json",
+        totalBills: updatedEstimates.length,
+        lastSavedBillSerial: filePayload.lastSavedBillSerial
+      });
+    } catch (err: any) {
+      console.error("Failed to save bill data to file:", err);
+      res.status(500).json({ error: "Failed to write bill data to file." });
+    }
+  });
+
+  // Scan Saved_Bills_Data.json for full restore in Add File Data modal
+  app.get("/api/saved-bills-file", (req, res) => {
+    try {
+      const readJsonSafe = (relPath: string): any => {
+        try {
+          const fullPath = path.join(process.cwd(), relPath);
+          if (fs.existsSync(fullPath)) {
+            return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+          }
+        } catch {}
+        return null;
+      };
+
+      const savedBillsFile =
+        readJsonSafe("tmp/saved_bills_data.json") ||
+        readJsonSafe("public/Saved_Bills_Data.json") ||
+        {};
+      const userRealData = readJsonSafe("tmp/user_real_data.json") || {};
+      const clientsRestore = readJsonSafe("tmp/clients_restore.json") || [];
+      const productsPart1 = readJsonSafe("tmp/products_part1.json") || [];
+      const productsPart2 = readJsonSafe("tmp/products_part2.json") || [];
+      const estimatesPart1 = readJsonSafe("tmp/estimates_part1.json") || [];
+      const estimatesPart2 = readJsonSafe("tmp/estimates_part2.json") || [];
+
+      // Combine Saved_Bills_Data.json with any baseline records so full restore never misses anything
+      const clientMap = new Map<string, any>();
+      for (const list of [savedBillsFile.clients || [], clientsRestore, userRealData.clients || []]) {
+        if (!Array.isArray(list)) continue;
+        for (const c of list) {
+          if (!c || !c.name) continue;
+          const cleanName = String(c.name).trim();
+          if (cleanName.includes("(Demo)")) continue;
+          const key = cleanName.toLowerCase();
+          if (!clientMap.has(key)) {
+            clientMap.set(key, { ...c, name: cleanName });
+          }
+        }
+      }
+
+      const demoSkus = new Set([
+        "SKU-ULTRA", "SKU-AMBUJA", "SKU-BERGER", "SKU-BRICK", "SKU-TATA",
+        "SKU-SAND", "SKU-BIRLA", "SKU-PVC", "SKU-ASIAN", "SKU-SIKA", "SKU-KAJARIA"
+      ]);
+      const productMap = new Map<string, any>();
+      for (const list of [savedBillsFile.products || [], userRealData.products || [], productsPart1, productsPart2]) {
+        if (!Array.isArray(list)) continue;
+        for (const p of list) {
+          if (!p || !p.name) continue;
+          if (p.sku && demoSkus.has(String(p.sku).trim())) continue;
+          const cleanName = String(p.name).trim();
+          const key = cleanName.toLowerCase();
+          if (!productMap.has(key)) {
+            productMap.set(key, { ...p, name: cleanName });
+          }
+        }
+      }
+
+      const estimateMap = new Map<string, any>();
+      for (const list of [estimatesPart1, estimatesPart2, userRealData.estimates || [], savedBillsFile.estimates || []]) {
+        if (!Array.isArray(list)) continue;
+        for (const e of list) {
+          if (!e) continue;
+          const key = String(e.serial || e.id || Math.random()).trim();
+          estimateMap.set(key, e);
+        }
+      }
+
+      const payload = {
+        fileName: "Saved_Bills_Data.json",
+        businessName: savedBillsFile.businessName || userRealData.businessName || "BillSync Pro",
+        lastSavedBillSerial: savedBillsFile.lastSavedBillSerial || "",
+        updatedAt: savedBillsFile.updatedAt || new Date().toISOString(),
+        clients: Array.from(clientMap.values()),
+        products: Array.from(productMap.values()),
+        estimates: Array.from(estimateMap.values()),
+        stockLogs: Array.isArray(savedBillsFile.stockLogs) ? savedBillsFile.stockLogs : []
+      };
+
+      res.json({ success: true, file: payload });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to scan Saved_Bills_Data.json" });
+    }
+  });
+
   // AI-powered purchase bill OCR/scan endpoint using Gemini SDK
   app.post("/api/scan-bill", async (req, res) => {
     const { image, customApiKey } = req.body;

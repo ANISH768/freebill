@@ -40,6 +40,7 @@ interface CustomersProps {
   onDeleteEstimate?: (id: number) => void;
   onViewLedger?: (clientId?: number) => void;
   userRole?: 'admin' | 'clerk';
+  onOpenFileImport?: () => void;
 }
 
 export default function Customers({ 
@@ -52,7 +53,8 @@ export default function Customers({
   onPrintEstimate,
   onDeleteEstimate,
   onViewLedger,
-  userRole = 'admin'
+  userRole = 'admin',
+  onOpenFileImport
 }: CustomersProps) {
   const [search, setSearch] = useState('');
   const [partyFilter, setPartyFilter] = useState<'ALL' | 'DUE' | 'SETTLED'>('ALL');
@@ -231,6 +233,17 @@ export default function Customers({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {onOpenFileImport && (
+            <button
+              type="button"
+              onClick={onOpenFileImport}
+              className="bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Add parties & data from saved project files or local JSON/CSV file"
+            >
+              <span>📂</span>
+              <span>Add File Data (फ़ाइल डेटा जोड़ें)</span>
+            </button>
+          )}
           {onViewLedger && (
             <button
               onClick={() => onViewLedger()}
