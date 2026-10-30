@@ -45,9 +45,16 @@ if not exist "node_modules\" (
     echo Dependencies are already loaded. Slower checks skipped.
 )
 
+if not exist ".env" (
+    if exist ".env.example" (
+        echo Creating default .env configuration file from .env.example...
+        copy /Y ".env.example" ".env" >nul
+    )
+)
+
 echo.
 echo =======================================================================
-echo STEP 3: Server start kiya ja raha hai...
+echo STEP 3: Server start kiya ja raha hai (1 PC + 2nd PC LAN Ready)...
 echo        [Starting local host server on Port 3000...]
 echo =======================================================================
 echo.
