@@ -80,6 +80,28 @@ export default function Backup({
   const [showEncryptExportModal, setShowEncryptExportModal] = useState(false);
   const [exportPassphrase, setExportPassphrase] = useState('');
 
+  // Network & Multi-PC Connection Info
+  const [networkInfo, setNetworkInfo] = useState<{
+    port: number;
+    hostname: string;
+    lanUrls: string[];
+    cloudSharedUrl: string;
+  }>({
+    port: 3000,
+    hostname: 'localhost',
+    lanUrls: [],
+    cloudSharedUrl: typeof window !== 'undefined' ? window.location.origin : 'https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app'
+  });
+
+  useEffect(() => {
+    fetch('/api/network-info')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) setNetworkInfo(data);
+      })
+      .catch(() => {});
+  }, []);
+
   // Scan browser storage for orphaned or old backup data
   const scanBrowserStorage = () => {
     const results: { key: string; length: number; type: string; sample?: string; rawData?: any }[] = [];
@@ -765,6 +787,92 @@ export default function Backup({
           <span className="font-bold leading-relaxed">{error}</span>
         </div>
       )}
+
+      {/* ----------------- 2-PC SAME SERVER & SAME DATA SETUP GUIDE ----------------- */}
+      <div className="bg-white rounded-2xl p-6 border-2 border-blue-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <span className="inline-block bg-blue-100 text-blue-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider mb-1">
+              🖥️ ↔️ 🖥️ 2 PC Live Multi-Counter Setup
+            </span>
+            <h3 className="text-base font-extrabold text-slate-900">
+              2 PC पर Same Server और Same Data के साथ कैसे चलाएं?
+            </h3>
+          </div>
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+            ✓ Auto-Sync Active (Account: {currentUser ? `+91 ${currentUser}` : 'Login Required'})
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          {/* Option 1: Cloud / Internet Server */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
+            <div className="font-extrabold text-slate-900 text-sm flex items-center justify-between">
+              <span>🌐 तरीका 1: Internet / Cloud Server (सबसे आसान)</span>
+              <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold">RECOMMENDED</span>
+            </div>
+            <ol className="list-decimal list-inside space-y-1 text-slate-700 font-medium leading-relaxed">
+              <li><b>PC 1</b> और <b>PC 2</b> दोनों के ब्राउज़र (Chrome/Edge) में नीचे दिया गया <b>Shared Server Link</b> खोलें।</li>
+              <li>दोनों PC में <b>एक ही Mobile Number ({currentUser || 'अपना नंबर'})</b> और <b>Same Password</b> से लॉगिन करें।</li>
+              <li>एक PC पर बिल बनते ही दूसरे PC में <b>Firebase + Cloud Server</b> से अपने आप दिखेगा!</li>
+            </ol>
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                readOnly
+                value={typeof window !== 'undefined' ? window.location.origin : networkInfo.cloudSharedUrl}
+                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-800 select-all"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const url = typeof window !== 'undefined' ? window.location.origin : networkInfo.cloudSharedUrl;
+                  navigator.clipboard?.writeText(url);
+                  setSuccess('✓ Server Link copied! Open this link on your 2nd PC.');
+                  setTimeout(() => setSuccess(null), 3500);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer shrink-0"
+              >
+                Copy Link
+              </button>
+            </div>
+          </div>
+
+          {/* Option 2: Offline Local Wi-Fi / LAN Server */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
+            <div className="font-extrabold text-slate-900 text-sm flex items-center justify-between">
+              <span>🔌 तरीका 2: Offline Same Wi-Fi / LAN Server</span>
+              <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold">LOCAL PC SERVER</span>
+            </div>
+            <ol className="list-decimal list-inside space-y-1 text-slate-700 font-medium leading-relaxed">
+              <li>सिर्फ <b>PC 1 (Main Counter)</b> पर <code className="bg-slate-200 px-1 rounded font-mono">RUN-ON-PC.bat</code> चलाएं।</li>
+              <li><b>PC 1</b> और <b>PC 2</b> दोनों को एक ही Wi-Fi या LAN केबल राउटर से जोड़ें।</li>
+              <li><b>PC 2</b> में कुछ इंस्टॉल न करें — सीधे ब्राउज़र में PC 1 का <b>LAN IP (`http://192.168.x.x:3000`)</b> खोलें और Same Number से लॉगिन करें।</li>
+            </ol>
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                readOnly
+                value={networkInfo.lanUrls[0] || 'http://192.168.1.X:3000 (Check RUN-ON-PC.bat window)'}
+                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-800 select-all"
+              />
+              {networkInfo.lanUrls[0] && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(networkInfo.lanUrls[0]);
+                    setSuccess(`✓ LAN Server IP (${networkInfo.lanUrls[0]}) copied!`);
+                    setTimeout(() => setSuccess(null), 3500);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer shrink-0"
+                >
+                  Copy LAN IP
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ----------------- HIGH-END PANEL 1: CLOUD AUTO-SYNC STATUS ----------------- */}
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-2xl p-6 border border-slate-750 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">

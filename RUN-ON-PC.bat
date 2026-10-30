@@ -52,7 +52,11 @@ echo        [Starting local host server on Port 3000...]
 echo =======================================================================
 echo.
 echo App aapke default web browser me abhi khul jayegi:
-echo URL: http://localhost:3000
+echo   PC 1 (This PC): http://localhost:3000
+echo.
+echo   PC 2 (Dusre PC par same Wi-Fi/LAN me niche diye IP ke aage :3000 lagayein):
+ipconfig | findstr /i "IPv4"
+echo   Example on 2nd PC: http://192.168.1.X:3000
 echo.
 echo To stop the app: Close this dark terminal window.
 echo [Is window ko stop karne ke liye ise cancel/close karein.]

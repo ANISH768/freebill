@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -137,6 +138,34 @@ async function startServer() {
   // Health and connection check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", message: "Server is online and ready for syncing!" });
+  });
+
+  // Network & Multi-PC Connection Info (returns LAN IPv4 addresses and active server URLs)
+  app.get("/api/network-info", (req, res) => {
+    try {
+      const nets = os.networkInterfaces();
+      const lanUrls: string[] = [];
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name] || []) {
+          if (net.family === "IPv4" && !net.internal) {
+            lanUrls.push(`http://${net.address}:${PORT}`);
+          }
+        }
+      }
+      res.json({
+        port: PORT,
+        hostname: os.hostname(),
+        lanUrls,
+        cloudSharedUrl: "https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app"
+      });
+    } catch (e) {
+      res.json({
+        port: PORT,
+        hostname: "localhost",
+        lanUrls: [],
+        cloudSharedUrl: "https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app"
+      });
+    }
   });
 
   // Load and list all available data files in the project (/tmp and /public)
@@ -1977,6 +2006,16 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    try {
+      const nets = os.networkInterfaces();
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name] || []) {
+          if (net.family === "IPv4" && !net.internal) {
+            console.log(`👉 Open on 2nd PC (Same Wi-Fi/LAN): http://${net.address}:${PORT}`);
+          }
+        }
+      }
+    } catch {}
   });
 }
 

@@ -1146,6 +1146,82 @@ export default function App() {
     startupSync();
   }, [currentUser, dbUsers]);
 
+  // Real-time Multi-PC Synchronization (Firestore live listener + 6-second LAN/Cloud Server poll)
+  useEffect(() => {
+    if (isForceOfflineActive || !currentUser || !isInitialPullDone) return;
+    const userMatched = dbUsers.find(u => u.phone === currentUser);
+
+    const applyIncomingRemoteSync = (remoteData: {
+      businessName?: string;
+      clients?: any[];
+      products?: any[];
+      estimates?: any[];
+      last_synced_millis?: number;
+      updatedAt?: string;
+    }) => {
+      if (isPendingPushRef.current) return;
+      const remoteEpoch = Number(remoteData.last_synced_millis) || (remoteData.updatedAt ? new Date(remoteData.updatedAt).getTime() : 0);
+      const localEpoch = Number(lastLocalMutationTimeRef.current) || 0;
+      if (!remoteEpoch || remoteEpoch <= localEpoch) return;
+
+      const incomingClients = Array.isArray(remoteData.clients) ? remoteData.clients : [];
+      const incomingProducts = Array.isArray(remoteData.products) ? sanitizeProducts(remoteData.products) : [];
+      const incomingEstimates = Array.isArray(remoteData.estimates)
+        ? filterDeletedEstimates(sanitizeEstimates(remoteData.estimates), currentUser)
+        : [];
+
+      // Never let an empty remote payload wipe out local data
+      if (incomingClients.length === 0 && incomingProducts.length === 0 && incomingEstimates.length === 0) return;
+
+      const clientsKey = getClientsKey(currentUser);
+      const productsKey = getProductsKey(currentUser);
+      const estimatesKey = getEstimatesKey(currentUser);
+      const mutationKey = getMutationKey(currentUser);
+
+      setDbClients(incomingClients);
+      safeStorage.setItem(clientsKey, JSON.stringify(incomingClients));
+
+      setDbProducts(incomingProducts);
+      safeStorage.setItem(productsKey, JSON.stringify(incomingProducts));
+
+      setDbEstimates(incomingEstimates);
+      safeStorage.setItem(estimatesKey, JSON.stringify(incomingEstimates));
+
+      if (remoteData.businessName) setBusinessName(remoteData.businessName);
+      if (remoteData.updatedAt) setLastSyncedAt(remoteData.updatedAt);
+
+      lastLocalMutationTimeRef.current = remoteEpoch;
+      setLastLocalMutationTime(remoteEpoch);
+      try {
+        safeStorage.setItem(mutationKey, remoteEpoch.toString());
+        safeStorage.setItem(`user_${currentUser}_last_synced_millis`, remoteEpoch.toString());
+        safeStorage.setItem(`last_local_mutation_${currentUser}`, remoteEpoch.toString());
+      } catch {}
+    };
+
+    // 1. Live Firestore subscription across PCs
+    const unsubFirestore = subscribeToUserFirestoreSync(currentUser, (cloudData) => {
+      applyIncomingRemoteSync(cloudData);
+    });
+
+    // 2. Periodic 6-second LAN/Cloud Server poll across PCs
+    const pollInterval = setInterval(async () => {
+      if (isPendingPushRef.current || !navigator.onLine || !userMatched?.password) return;
+      try {
+        const res = await fetch(`/api/sync/${currentUser}?password=${encodeURIComponent(userMatched.password)}`);
+        if (res.ok) {
+          const srvData = await res.json();
+          applyIncomingRemoteSync(srvData);
+        }
+      } catch {}
+    }, 6000);
+
+    return () => {
+      unsubFirestore();
+      clearInterval(pollInterval);
+    };
+  }, [currentUser, dbUsers, isInitialPullDone, isForceOfflineActive]);
+
   // Synchronous force cloud save helper
   const forceCloudSaveSynchronous = async (
     updatedClients: Client[],
