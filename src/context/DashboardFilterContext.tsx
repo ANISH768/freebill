@@ -28,7 +28,7 @@ interface DashboardFilterContextValue extends DashboardFilterState {
   resetFilters: () => void;
 }
 
-const STORAGE_KEY = 'billsync_dashboard_filter_v2';
+const STORAGE_KEY = 'billsync_dashboard_filter_v3';
 
 const getDefaultDates = () => {
   const now = new Date();
@@ -42,7 +42,7 @@ const getInitialFilterState = (): DashboardFilterState => {
   const defaultState: DashboardFilterState = {
     search: '',
     statusFilter: 'ALL',
-    datePreset: 'TODAY', // Standard retail counter default: Today Bill
+    datePreset: 'ALL_TIME', // Default to ALL_TIME so all created bills are immediately visible in Dashboard
     customerType: 'ALL',
     selectedCategory: 'ALL',
     customStartDate: start,

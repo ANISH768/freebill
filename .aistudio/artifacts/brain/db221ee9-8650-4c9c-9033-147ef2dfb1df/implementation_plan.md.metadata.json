@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for adding a synchronized Settings toggle (in Settings > Auto-Backup & Sync and on the Billing screen) that automatically downloads Saved_Bills_Data.json to the user's Downloads folder every time a bill is saved.",
-  "updatedAt":  "2026-10-25T16:06:34.509230920Z",
+  "summary":  "Implementation plan to remove duplicate navigation and action buttons from the top workspace bar and Dashboard that already exist in the left sidebar.",
+  "updatedAt":  "2026-10-30T14:17:29.483534691Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

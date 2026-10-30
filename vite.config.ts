@@ -19,6 +19,9 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {
         ignored: [
           '**/server_db.json',
+          '**/Saved_Bills_Data.json',
+          '**/public/Saved_Bills_Data.json',
+          '**/tmp/**',
           '**/node_modules/**',
           '**/.git/**',
           '**/~*',

@@ -25,31 +25,37 @@ class SafeStorageMemory {
   }
 
   private saveBackup(): void {
-    if (typeof window === 'undefined') return;
+    // Avoid serializing multi-megabyte catalogs into document.cookie on every write
+  }
+
+  private pruneRedundantStorageKeys(preserveKey?: string): void {
+    if (!this.hasLocalStorage()) return;
+    const redundantPatterns = [
+      'saved_bills_file_data',
+      'offline_sync_queue',
+      'off_products',
+      'off_estimates',
+      '_data'
+    ];
     try {
-      const serialized = JSON.stringify(this.memStore);
-      const obfuscated = btoa(unescape(encodeURIComponent(serialized)));
-      window.name = `__SAFE_DB_BACKUP_SIG__:${obfuscated}`;
-      document.cookie = `safe_db_backup=${encodeURIComponent(obfuscated)}; max-age=31536000; path=/; SameSite=Lax`;
-    } catch (e) {
-      console.warn("Failed to write fail-safe backup", e);
-    }
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (!k || k === preserveKey) continue;
+        if (redundantPatterns.some(pat => k === pat || k.endsWith(pat))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => {
+        try {
+          window.localStorage.removeItem(k);
+        } catch {}
+      });
+    } catch {}
   }
 
   private restoreFromBackup(): void {
     if (typeof window === 'undefined') return;
-    try {
-      if (this.hasLocalStorage()) {
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          if (key) {
-            const val = window.localStorage.getItem(key);
-            if (val !== null) this.memStore[key] = val;
-          }
-        }
-      }
-    } catch (e) {}
-
     try {
       if (this.hasSessionStorage()) {
         for (let i = 0; i < window.sessionStorage.length; i++) {
@@ -63,18 +69,23 @@ class SafeStorageMemory {
     } catch (e) {}
 
     try {
-      if (window.name && window.name.startsWith('__SAFE_DB_BACKUP_SIG__:')) {
-        const obfuscated = window.name.substring('__SAFE_DB_BACKUP_SIG__:'.length);
-        const decoded = decodeURIComponent(escape(atob(obfuscated)));
-        const parsed = JSON.parse(decoded);
-        if (parsed && typeof parsed === 'object') {
-          Object.assign(this.memStore, parsed);
+      if (this.hasLocalStorage()) {
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key) {
+            const val = window.localStorage.getItem(key);
+            if (val !== null) this.memStore[key] = val;
+          }
         }
       }
     } catch (e) {}
   }
 
   getItem(key: string): string | null {
+    if (Object.prototype.hasOwnProperty.call(this.memStore, key) && this.memStore[key] !== undefined) {
+      return this.memStore[key];
+    }
+
     try {
       if (this.hasLocalStorage()) {
         const val = window.localStorage.getItem(key);
@@ -102,15 +113,30 @@ class SafeStorageMemory {
     this.memStore[key] = value;
     try {
       if (this.hasLocalStorage()) {
-        window.localStorage.setItem(key, value);
+        try {
+          window.localStorage.setItem(key, value);
+        } catch (quotaErr) {
+          // Prune bloated duplicate keys and retry so new bills/estimates are never lost
+          this.pruneRedundantStorageKeys(key);
+          try {
+            window.localStorage.setItem(key, value);
+          } catch {}
+        }
       }
     } catch (e) {}
     try {
       if (this.hasSessionStorage()) {
-        window.sessionStorage.setItem(key, value);
+        try {
+          window.sessionStorage.setItem(key, value);
+        } catch {
+          try {
+            window.sessionStorage.removeItem('saved_bills_file_data');
+            window.sessionStorage.removeItem('offline_sync_queue');
+            window.sessionStorage.setItem(key, value);
+          } catch {}
+        }
       }
     } catch (e) {}
-    this.saveBackup();
   }
 
   removeItem(key: string): void {
@@ -125,7 +151,6 @@ class SafeStorageMemory {
         window.sessionStorage.removeItem(key);
       }
     } catch (e) {}
-    this.saveBackup();
   }
 
   clear(): void {
@@ -136,7 +161,6 @@ class SafeStorageMemory {
     try {
       if (this.hasSessionStorage()) window.sessionStorage.clear();
     } catch (e) {}
-    this.saveBackup();
   }
 }
 

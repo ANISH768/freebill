@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Client, Product, Estimate, InvoiceItem, SecondaryPrintStyle } from '../types';
 import { getSavedPrintConfig, savePrintConfig } from '../utils/printConfig';
 import { getSavedAppSettings, saveAppSettings, playBillingSuccessSound } from '../utils/appSettings';
+import { toTitleCaseWords } from '../utils/textFormat';
 import { 
   Plus, 
   Trash, 
@@ -558,9 +559,10 @@ export default function CreateEstimate({
   };
 
   const handleRowChange = (id: string, field: keyof RowState, value: string | number) => {
+    const formattedValue = field === 'name' && typeof value === 'string' ? toTitleCaseWords(value) : value;
     const updated = rows.map(r => {
       if (r.id === id) {
-        let nRow = { ...r, [field]: value };
+        let nRow = { ...r, [field]: formattedValue };
         
         let mrpVal = Number(nRow.mrp) || 0;
         let qtyVal = Number(nRow.qty) || 0;
@@ -1542,7 +1544,7 @@ export default function CreateEstimate({
                       placeholder="Select Customer (F6) - Search name or mobile... (↑ ↓ navigate, Enter / → / ← select)"
                       value={partySearch}
                       onChange={(e) => {
-                        setPartySearch(e.target.value);
+                        setPartySearch(toTitleCaseWords(e.target.value));
                         setShowPartyPicker(true);
                         setHighlightedPartyIndex(0);
                       }}

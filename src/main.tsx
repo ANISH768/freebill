@@ -3,7 +3,13 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { DashboardFilterProvider } from './context/DashboardFilterContext.tsx';
+import { installGlobalTitleCaseListener } from './utils/textFormat.ts';
 import './index.css';
+
+// Install global word-by-word Title Case formatter (First letter Capital, rest lowercase) on text inputs
+if (typeof window !== 'undefined') {
+  installGlobalTitleCaseListener();
+}
 
 // Safely intercept dialog APIs that are frequently denied in nested iframe sandboxes
 if (typeof window !== 'undefined') {

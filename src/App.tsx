@@ -31,6 +31,7 @@ import { safeStorage, saveUserIsolatedData, getUserIsolatedData, addToOfflineSyn
 import { requestPersistentStorage } from './utils/crypto';
 import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigured, subscribeToUserFirestoreSync } from './db/firebase';
 import { isEstimateForClient } from './utils/clientMatching';
+import { isCapsLockActive, setCapsLockActive } from './utils/textFormat';
 
 const sanitizeEstimates = (estimates: any[]): Estimate[] => {
   if (!Array.isArray(estimates)) return [];
@@ -328,6 +329,20 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState('Downloading your latest multi-device cloud backup. Please do not close or reload this window.');
   const [renderKey, setRenderKey] = useState(0);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'synced' | 'saving' | 'offline' | 'error' | null>('synced');
+  const [capsLockOn, setCapsLockOn] = useState<boolean>(() => isCapsLockActive());
+
+  useEffect(() => {
+    const handleCapsChange = (e: Event) => {
+      const customEvt = e as CustomEvent<{ capsLockOn: boolean }>;
+      if (customEvt.detail && typeof customEvt.detail.capsLockOn === 'boolean') {
+        setCapsLockOn(customEvt.detail.capsLockOn);
+      } else {
+        setCapsLockOn(isCapsLockActive());
+      }
+    };
+    window.addEventListener('capslockchange', handleCapsChange);
+    return () => window.removeEventListener('capslockchange', handleCapsChange);
+  }, []);
 
   const registerLocalMutation = () => {
     const now = Date.now();
@@ -890,17 +905,34 @@ export default function App() {
       setDbProducts([]);
     }
 
-    // Load Estimates
+    // Load Estimates (check all candidate storage keys and merge so no bills are ever lost)
     try {
-      const stored = safeStorage.getItem(estimatesKey);
-      if (stored) {
-        const cleaned = filterDeletedEstimates(sanitizeEstimates(JSON.parse(stored)), currentUser);
-        setDbEstimates(cleaned);
-        safeStorage.setItem(estimatesKey, JSON.stringify(cleaned));
-      } else {
-        setDbEstimates([]);
-        safeStorage.setItem(estimatesKey, JSON.stringify([]));
+      const candidateKeys = [
+        estimatesKey,
+        `user_${currentUser}_estimates`,
+        `off_estimates_${currentUser}`,
+        'off_estimates'
+      ];
+      const mergedMap = new Map<string | number, Estimate>();
+      for (const k of candidateKeys) {
+        const raw = safeStorage.getItem(k);
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const sanitized = filterDeletedEstimates(sanitizeEstimates(parsed), currentUser);
+            for (const est of sanitized) {
+              if (est && (est.id || est.serial)) {
+                const mapKey = est.serial ? String(est.serial).trim().toUpperCase() : est.id;
+                mergedMap.set(mapKey, est);
+              }
+            }
+          }
+        } catch {}
       }
+      const cleaned = Array.from(mergedMap.values());
+      setDbEstimates(cleaned);
+      safeStorage.setItem(estimatesKey, JSON.stringify(cleaned));
     } catch (e) {
       setDbEstimates([]);
     }
@@ -2805,7 +2837,15 @@ export default function App() {
         estimates: updatedEstimates,
         stockLogs: updatedLogs
       };
-      safeStorage.setItem('saved_bills_file_data', JSON.stringify(billFilePayload));
+      // Store lightweight bill & party records in localStorage to avoid exceeding 5MB quota
+      safeStorage.setItem('saved_bills_file_data', JSON.stringify({
+        fileName: 'Saved_Bills_Data.json',
+        businessName,
+        lastSavedBillSerial: payload.serial,
+        updatedAt: billFilePayload.updatedAt,
+        clients: dbClients,
+        estimates: updatedEstimates
+      }));
 
       fetch('/api/save-bill-file', {
         method: 'POST',
@@ -2952,7 +2992,6 @@ export default function App() {
                 body: JSON.stringify(finalMergedPayload)
               }).catch(() => {});
 
-              setRenderKey(prev => prev + 1);
               setSyncConflictDetected(false);
               setAutoSaveStatus('synced');
               removeFromOfflineSyncQueue(currentUser);
@@ -3528,7 +3567,7 @@ export default function App() {
     }
 
     return (
-      <div key={renderKey} className="flex flex-col min-h-screen bg-slate-100 select-none no-print pb-20">
+      <div className="flex flex-col min-h-screen bg-slate-100 select-none no-print pb-20">
         {/* Toast notifications */}
         {toastMessage && (
           <div className="fixed top-4 left-4 right-4 bg-slate-900 text-white font-bold text-xs py-3 px-4 rounded-xl shadow-xl flex items-center space-x-2.5 z-50 animate-bounce">
@@ -4310,7 +4349,7 @@ export default function App() {
   const currentLoggedUserEmail = currentLoggedUser?.email || getSavedPrintConfig(businessName, currentUser || undefined).email || '';
 
   return (
-    <div key={renderKey} className="flex flex-col md:flex-row min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+    <div className="flex flex-col md:flex-row min-h-screen md:h-screen md:overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       <ConfirmModalHost />
       <KeyboardShortcutModal
         isOpen={showShortcutGuideModal}
@@ -4345,7 +4384,7 @@ export default function App() {
       )}
 
       {/* ----------------- SIDEBAR RAIL NAVIGATION ----------------- */}
-      <aside className={`no-print bg-slate-950 text-slate-200 w-full flex-shrink-0 transition-all duration-300 flex flex-col justify-between border-r border-slate-900 select-none ${
+      <aside className={`no-print bg-slate-950 text-slate-200 w-full flex-shrink-0 transition-all duration-300 flex flex-col justify-between border-r border-slate-900 select-none md:h-screen md:sticky md:top-0 md:overflow-y-auto custom-scrollbar ${
         isSidebarMinimized ? 'md:w-20 p-4' : 'md:w-64 p-6'
       }`}>
         
@@ -4610,86 +4649,74 @@ export default function App() {
       </aside>
 
       {/* ----------------- CONTAINER MAIN CORE FRAME ----------------- */}
-      <main className="flex-1 p-6 md:p-8 overflow-y-auto no-print">
-
-        {/* Subtle Background Auto-Save Status Header Bar */}
-        <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 gap-4 no-print select-none">
-          <div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-              <span>{currentTab === 'dashboard' ? '📊 Dashboard & Reports' :
-                    currentTab === 'create_estimate' ? '📝 Sales Invoice / Bill' :
-                    currentTab === 'products' ? '📦 Items & Inventory Stock' :
-                    currentTab === 'clients' ? '👥 Parties & Customers Directory' :
-                    currentTab === 'statements' ? '🏦 Party Ledgers & Passbook' :
-                    currentTab === 'print_customizer' ? '🖨️ Invoice Customizer & Print Setup' :
-                    currentTab === 'settings' ? '⚙️ Settings & Configuration' :
-                    currentTab === 'backup' ? '💾 Cloud Backup & Sync' : 'myBillBook'}</span>
-            </h2>
-            <p className="text-xs text-slate-500 font-semibold mt-1">
-              {businessName} • Connected user: +91 {currentUser}
-            </p>
+      <main className="flex-1 p-5 md:p-7 md:h-screen overflow-y-auto custom-scrollbar no-print bg-slate-50/70 dark:bg-slate-950">
+        {/* Modernized Workspace Top Bar */}
+        <div className="mb-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl px-4 py-3.5 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3.5 no-print select-none">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-base shadow-xs shrink-0">
+              {currentTab === 'dashboard' ? '📊' :
+               currentTab === 'create_estimate' ? '🧾' :
+               currentTab === 'products' ? '📦' :
+               currentTab === 'clients' ? '👥' :
+               currentTab === 'statements' ? '🏦' :
+               currentTab === 'print_customizer' ? '🖨️' :
+               currentTab === 'settings' ? '⚙️' : '💾'}
+            </div>
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug">
+                {currentTab === 'dashboard' ? 'Business Dashboard & Analytics' :
+                 currentTab === 'create_estimate' ? 'POS Billing & Invoice Counter' :
+                 currentTab === 'products' ? 'Inventory & Stock Register' :
+                 currentTab === 'clients' ? 'Parties & Customer Directory' :
+                 currentTab === 'statements' ? 'Party Ledgers & Khata Passbook' :
+                 currentTab === 'print_customizer' ? 'Invoice Customizer & Print Setup' :
+                 currentTab === 'settings' ? 'System Settings & Preferences' :
+                 currentTab === 'backup' ? 'Cloud Backup & Multi-Device Sync' : 'myBillBook Pro'}
+              </h2>
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{businessName}</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono">+91 {currentUser}</span>
+              </div>
+            </div>
           </div>
           
-          {/* Top Actions: Add File Data, Keyboard Shortcuts, Dark Mode, Quick Lock, Settings, & Cloud Status */}
+          {/* Top Actions: Caps Lock Mode Indicator, Dark/Light Mode, Cloud Sync Status */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Add Data from Files Button */}
+            {/* Live Typing Mode / Caps Lock Status Indicator */}
             <button
               type="button"
-              onClick={() => setShowFileDataImportModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white border border-teal-600 rounded-full text-[11px] font-black shadow-xs transition-all cursor-pointer active:scale-95"
-              title="Add Data from Project or Local Files (फ़ाइल डेटा जोड़ें)"
+              onClick={() => {
+                const nextState = !capsLockOn;
+                setCapsLockActive(nextState);
+                showToast(
+                  nextState
+                    ? '🔠 CAPS LOCK ON: Typing in ALL CAPITAL LETTERS'
+                    : '🔤 Title Case Mode: First Letter Capital + Rest Small'
+                );
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                capsLockOn
+                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+              }`}
+              title="Press Caps Lock on keyboard (or click here) to switch between ALL CAPS and Title Case (First letter Capital, rest small)"
             >
-              <FolderOpen className="w-3.5 h-3.5 text-teal-100" />
-              <span>📂 Add File Data (फ़ाइल डेटा जोड़ें)</span>
-            </button>
-
-            {/* Keyboard Shortcut Guide Trigger (F1) */}
-            <button
-              type="button"
-              onClick={() => setShowShortcutGuideModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-full text-[11px] font-bold shadow-xs transition-colors cursor-pointer"
-              title="Open Keyboard Shortcut Guide (Press F1)"
-            >
-              <Keyboard className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Shortcuts</span>
-              <kbd className="px-1.5 py-0.2 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded text-[9px] font-mono font-black">
-                F1
-              </kbd>
+              <span className="font-mono font-black text-[10px] px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900 text-slate-900 dark:text-white">
+                {capsLockOn ? 'CAPS ON' : 'Aa'}
+              </span>
+              <span>{capsLockOn ? 'ALL CAPS ACTIVE' : 'Auto Title Case'}</span>
             </button>
 
             {/* Dark Mode toggle */}
             <button
               type="button"
               onClick={() => handleToggleDarkMode(!appSettings.darkMode)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-[11px] font-bold shadow-xs transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
               title={appSettings.darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
             >
               {appSettings.darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
-              <span>{appSettings.darkMode ? "Light Mode" : "Dark Mode"}</span>
-            </button>
-
-            {/* Quick Counter Lock */}
-            <button
-              onClick={() => setIsCounterLocked(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[11px] font-bold shadow-xs transition-colors cursor-pointer"
-              title="Lock retail counter session"
-            >
-              <Lock className="w-3.5 h-3.5 text-amber-600" />
-              <span>Lock Counter</span>
-            </button>
-
-            {/* Quick Settings */}
-            <button
-              onClick={() => navigateToTab('settings')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
-                currentTab === 'settings'
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}
-              title="Settings & Profile"
-            >
-              <SettingsIcon className="w-3.5 h-3.5" />
-              <span>Settings</span>
+              <span>{appSettings.darkMode ? "Light" : "Dark"}</span>
             </button>
 
             {/* Subtle Cloud Auto-Save Indicator */}

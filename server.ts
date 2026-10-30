@@ -317,19 +317,19 @@ async function startServer() {
     try {
       const { bill, estimates, clients, products, stockLogs, businessName } = req.body || {};
       const tmpDir = path.join(process.cwd(), "tmp");
-      const publicDir = path.join(process.cwd(), "public");
       if (!fs.existsSync(tmpDir)) {
         fs.mkdirSync(tmpDir, { recursive: true });
       }
-      if (!fs.existsSync(publicDir)) {
-        fs.mkdirSync(publicDir, { recursive: true });
-      }
 
       const savedBillsPath = path.join(tmpDir, "saved_bills_data.json");
-      const publicSavedBillsPath = path.join(publicDir, "Saved_Bills_Data.json");
+      const osTmpSavedBillsPath = "/tmp/billsync_saved_bills_data.json";
 
       let existingData: any = { clients: [], products: [], estimates: [], stockLogs: [] };
-      if (fs.existsSync(savedBillsPath)) {
+      if (fs.existsSync(osTmpSavedBillsPath)) {
+        try {
+          existingData = JSON.parse(fs.readFileSync(osTmpSavedBillsPath, "utf-8"));
+        } catch {}
+      } else if (fs.existsSync(savedBillsPath)) {
         try {
           existingData = JSON.parse(fs.readFileSync(savedBillsPath, "utf-8"));
         } catch {}
@@ -364,8 +364,11 @@ async function startServer() {
       };
 
       const jsonContent = JSON.stringify(filePayload, null, 2);
+      try {
+        fs.writeFileSync(osTmpSavedBillsPath, jsonContent, "utf-8");
+      } catch {}
       fs.writeFileSync(savedBillsPath, jsonContent, "utf-8");
-      fs.writeFileSync(publicSavedBillsPath, jsonContent, "utf-8");
+      // NOTE: Do NOT write into public/Saved_Bills_Data.json at runtime because Vite's static public watcher triggers a full browser reload!
 
       res.json({
         success: true,
@@ -379,12 +382,32 @@ async function startServer() {
     }
   });
 
+  // Dynamic route for /Saved_Bills_Data.json so static public/ folder is never mutated at runtime
+  app.get("/Saved_Bills_Data.json", (req, res) => {
+    try {
+      const osTmpSavedBillsPath = "/tmp/billsync_saved_bills_data.json";
+      const tmpSavedBillsPath = path.join(process.cwd(), "tmp", "saved_bills_data.json");
+      const publicSavedBillsPath = path.join(process.cwd(), "public", "Saved_Bills_Data.json");
+      for (const candidate of [osTmpSavedBillsPath, tmpSavedBillsPath, publicSavedBillsPath]) {
+        if (fs.existsSync(candidate)) {
+          res.setHeader("Content-Type", "application/json");
+          return res.send(fs.readFileSync(candidate, "utf-8"));
+        }
+      }
+      res.json({ fileName: "Saved_Bills_Data.json", clients: [], products: [], estimates: [], stockLogs: [] });
+    } catch {
+      res.status(500).json({ error: "Could not read Saved_Bills_Data.json" });
+    }
+  });
+
   // Scan Saved_Bills_Data.json for full restore in Add File Data modal
   app.get("/api/saved-bills-file", (req, res) => {
     try {
-      const readJsonSafe = (relPath: string): any => {
+      const readJsonSafe = (relOrAbsPath: string): any => {
         try {
-          const fullPath = path.join(process.cwd(), relPath);
+          const fullPath = path.isAbsolute(relOrAbsPath)
+            ? relOrAbsPath
+            : path.join(process.cwd(), relOrAbsPath);
           if (fs.existsSync(fullPath)) {
             return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
           }
@@ -393,6 +416,7 @@ async function startServer() {
       };
 
       const savedBillsFile =
+        readJsonSafe("/tmp/billsync_saved_bills_data.json") ||
         readJsonSafe("tmp/saved_bills_data.json") ||
         readJsonSafe("public/Saved_Bills_Data.json") ||
         {};
@@ -1930,7 +1954,15 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined
+        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+        watch: {
+          ignored: [
+            '**/server_db.json',
+            '**/Saved_Bills_Data.json',
+            '**/public/Saved_Bills_Data.json',
+            '**/tmp/**'
+          ]
+        }
       },
       appType: "spa",
     });
