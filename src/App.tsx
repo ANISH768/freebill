@@ -29,9 +29,10 @@ import { t, getSavedLanguage, SupportedLanguage } from './utils/i18n';
 import { Shield, LayoutDashboard, FileSpreadsheet, Layers, Users, Landmark, Database, UserCheck, LogOut, CheckCircle, ChevronLeft, ChevronRight, Lock, Unlock, Printer, Settings as SettingsIcon, Moon, Sun, Globe2, Keyboard, FolderOpen } from 'lucide-react';
 import { safeStorage, saveUserIsolatedData, getUserIsolatedData, addToOfflineSyncQueue, getOfflineSyncQueue, removeFromOfflineSyncQueue, clearOfflineSyncQueue } from './utils/storage';
 import { requestPersistentStorage } from './utils/crypto';
-import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigured, subscribeToUserFirestoreSync } from './db/firebase';
+import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigured, subscribeToUserFirestoreSync, findUserByPermanentIpFromFirestore } from './db/firebase';
 import { isEstimateForClient } from './utils/clientMatching';
 import { isCapsLockActive, setCapsLockActive } from './utils/textFormat';
+import { getPermanentIpForUser, extractPermanentIpFromLocation } from './utils/permanentIp';
 
 const sanitizeEstimates = (estimates: any[]): Estimate[] => {
   if (!Array.isArray(estimates)) return [];
@@ -1883,6 +1884,99 @@ export default function App() {
       setIsSyncingLogin(false);
     }
   };
+
+  // Automatic 2nd-PC Login when opening a User ID's Permanent IP Link (/ip/10.X.Y.Z or ?ip=10.X.Y.Z)
+  useEffect(() => {
+    const targetPermanentIp = extractPermanentIpFromLocation();
+    if (!targetPermanentIp) return;
+
+    let cancelled = false;
+    const autoLoginByPermanentIp = async () => {
+      try {
+        showToast(`🔗 Connecting to Permanent Counter IP (${targetPermanentIp}:3000)...`);
+        let resolvedPhone = '';
+        let resolvedBusinessName = 'My Counter';
+        let resolvedPassword = '';
+        let resolvedSyncData: any = null;
+
+        // 1. Check Express Server (/api/auth/permanent-ip/:ip)
+        try {
+          const srvRes = await fetch(`/api/auth/permanent-ip/${encodeURIComponent(targetPermanentIp)}`);
+          if (srvRes.ok) {
+            const data = await srvRes.json();
+            if (data?.user?.phone) {
+              resolvedPhone = String(data.user.phone).trim();
+              resolvedBusinessName = data.user.businessName || 'My Counter';
+              resolvedPassword = data.user.password || '';
+              resolvedSyncData = data.syncData || null;
+            }
+          }
+        } catch {}
+
+        // 2. Fallback to Firebase Cloud Firestore lookup by permanent IP
+        if (!resolvedPhone) {
+          const fsMatch = await findUserByPermanentIpFromFirestore(targetPermanentIp);
+          if (fsMatch && fsMatch.phone) {
+            resolvedPhone = fsMatch.phone;
+            resolvedBusinessName = fsMatch.businessName || 'My Counter';
+            resolvedSyncData = fsMatch;
+          }
+        }
+
+        // 3. Fallback to local dbUsers matching this permanent IP
+        if (!resolvedPhone && dbUsers.length > 0) {
+          const localMatch = dbUsers.find(u => getPermanentIpForUser(u.phone).ipHost === targetPermanentIp);
+          if (localMatch) {
+            resolvedPhone = localMatch.phone;
+            resolvedBusinessName = localMatch.businessName || 'My Counter';
+            resolvedPassword = localMatch.password || '';
+          }
+        }
+
+        if (cancelled || !resolvedPhone) return;
+
+        // Clean URL bar so refreshes stay cleanly on the counter dashboard
+        try {
+          window.history.replaceState({}, '', '/');
+        } catch {}
+
+        // Pre-seed synced data if returned so the counter screen has all records immediately
+        if (resolvedSyncData) {
+          const cKey = getClientsKey(resolvedPhone);
+          const pKey = getProductsKey(resolvedPhone);
+          const eKey = getEstimatesKey(resolvedPhone);
+          if (Array.isArray(resolvedSyncData.clients) && resolvedSyncData.clients.length > 0) {
+            safeStorage.setItem(cKey, JSON.stringify(resolvedSyncData.clients));
+          }
+          if (Array.isArray(resolvedSyncData.products) && resolvedSyncData.products.length > 0) {
+            safeStorage.setItem(pKey, JSON.stringify(resolvedSyncData.products));
+          }
+          if (Array.isArray(resolvedSyncData.estimates) && resolvedSyncData.estimates.length > 0) {
+            safeStorage.setItem(eKey, JSON.stringify(resolvedSyncData.estimates));
+          }
+        }
+
+        handleUpdateUsers([
+          {
+            phone: resolvedPhone,
+            businessName: resolvedBusinessName,
+            password: resolvedPassword || '1234'
+          }
+        ]);
+
+        await handleLoginSuccess(resolvedPhone, resolvedBusinessName, 'admin', resolvedPassword || undefined);
+        const permInfo = getPermanentIpForUser(resolvedPhone);
+        showToast(`✓ Auto-Logged In to ID +91 ${resolvedPhone} (Permanent IP: ${permInfo.ipWithPort})`);
+      } catch (err) {
+        console.warn('[Permanent IP Auto-Login] Could not auto-login:', err);
+      }
+    };
+
+    autoLoginByPermanentIp();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Background Auto-sync whenever local database properties update (debentured/delayed PWA behaviour)
   useEffect(() => {
@@ -4472,9 +4566,14 @@ export default function App() {
                   📘
                 </div>
                 <div>
-                  <div className="flex items-center leading-none">
-                    <span className="text-red-500 font-black text-lg tracking-tight">my</span>
-                    <span className="text-white font-black text-lg tracking-tight">BillBook</span>
+                  <div className="flex items-center gap-1.5 leading-none">
+                    <div>
+                      <span className="text-red-500 font-black text-lg tracking-tight">my</span>
+                      <span className="text-white font-black text-lg tracking-tight">BillBook</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                      v5.1.0
+                    </span>
                   </div>
                   <span className="text-[9px] font-bold text-blue-400 mt-1 block uppercase tracking-wider">GST Billing & Accounting</span>
                 </div>
@@ -4496,26 +4595,52 @@ export default function App() {
             </button>
           </div>
 
-          {/* Connected Session Status card */}
+          {/* Connected Session Status card + Permanent Per-ID LAN IP */}
           {!isSidebarMinimized && (
-            <div
-              onClick={currentUserRole !== 'clerk' ? triggerOpenProfileModal : undefined}
-              className={`bg-slate-900/60 p-3.5 rounded-2xl border border-slate-900/10 flex items-center space-x-3 transition-colors ${
-                currentUserRole !== 'clerk' ? 'cursor-pointer hover:bg-slate-900' : ''
-              }`}
-            >
-              <div className="w-8 h-8 rounded-full bg-slate-800 text-blue-300 flex items-center justify-center text-xs border">
-                {currentUserRole === 'clerk' ? '💼' : '👤'}
+            <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+              <div
+                onClick={currentUserRole !== 'clerk' ? triggerOpenProfileModal : undefined}
+                className={`flex items-center space-x-3 transition-colors ${
+                  currentUserRole !== 'clerk' ? 'cursor-pointer hover:opacity-90' : ''
+                }`}
+              >
+                <div className="w-8 h-8 rounded-full bg-slate-800 text-blue-300 flex items-center justify-center text-xs border border-slate-700 shrink-0">
+                  {currentUserRole === 'clerk' ? '💼' : '👤'}
+                </div>
+                <div className="overflow-hidden">
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">
+                    {currentUserRole === 'clerk' ? 'Billing Staff Session' : 'Owner Session'}
+                  </p>
+                  <span className="text-xs font-black text-white block mt-1 font-mono tabular-nums truncate">+91 {currentUser}</span>
+                  {currentUserRole !== 'clerk' && (
+                    <span className="text-[8px] text-blue-400 font-bold hover:underline block mt-0.5 uppercase tracking-wide">Edit details</span>
+                  )}
+                </div>
               </div>
-              <div className="overflow-hidden">
-                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider leading-none">
-                  {currentUserRole === 'clerk' ? 'Billing Staff Session' : 'Owner Session'}
-                </p>
-                <span className="text-xs font-black text-white block mt-1 font-mono truncate">+91 {currentUser}</span>
-                {currentUserRole !== 'clerk' && (
-                  <span className="text-[8px] text-blue-400 font-bold hover:underline block mt-0.5 uppercase tracking-wide">Edit details</span>
-                )}
-              </div>
+
+              {/* Single Permanent Non-Changing LAN IP for this User ID */}
+              {currentUser && (
+                <div className="pt-2 border-t border-slate-800/90 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[9px] text-slate-400 font-semibold block">Permanent ID LAN IP</span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-400 tabular-nums block truncate">
+                      {getPermanentIpForUser(currentUser).ipWithPort}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const perm = getPermanentIpForUser(currentUser);
+                      navigator.clipboard?.writeText(perm.autoLoginUrl);
+                      showToast(`✓ Copied Permanent 2nd-PC Auto-Login Link (${perm.ipWithPort})`);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-200 border border-slate-700 cursor-pointer shrink-0"
+                    title="Copy Permanent 2nd-PC Auto-Login Link for this User ID"
+                  >
+                    Copy IP
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

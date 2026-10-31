@@ -1,8 +1,8 @@
 @echo off
-title Offline Billing System Setup and Runner
+title BillSync Pro v5.1.0 - Offline & Multi-PC Billing System
 color 0b
 echo =======================================================================
-echo               OFFLINE BILLING SYSTEM - PC RUNNER AND SETUP
+echo         BILLSYNC PRO (v5.1.0) - OFFLINE ^& 2-PC SERVER RUNNER
 echo =======================================================================
 echo.
 echo Is Billing App ko aapke PC par setup karne me aapka swagat hai!

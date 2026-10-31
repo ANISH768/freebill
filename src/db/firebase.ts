@@ -4,12 +4,14 @@ import {
   doc, 
   setDoc, 
   getDoc, 
+  getDocs,
   onSnapshot, 
   collection, 
   Firestore,
   serverTimestamp
 } from 'firebase/firestore';
 import firebaseConfigJson from '../../firebase-applet-config.json';
+import { getPermanentIpForUser } from '../utils/permanentIp';
 
 let appInstance: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
@@ -102,10 +104,13 @@ export async function pushUserSyncToFirestore(phone: string, payload: CloudSyncP
     if (!isFirebaseConfigured() || !phone) return false;
     const db = getFirebaseDb();
     const cleanPhone = String(phone).trim();
+    const permInfo = getPermanentIpForUser(cleanPhone);
     const docRef = doc(db, 'sync_data', cleanPhone);
 
     const dataToSave = {
       phone: cleanPhone,
+      permanentIp: permInfo.ipHost,
+      permanentIpWithPort: permInfo.ipWithPort,
       businessName: payload.businessName || 'My Counter',
       clients: sanitizeForFirestore(Array.isArray(payload.clients) ? payload.clients : []),
       products: sanitizeForFirestore(Array.isArray(payload.products) ? payload.products : []),
@@ -118,11 +123,46 @@ export async function pushUserSyncToFirestore(phone: string, payload: CloudSyncP
     };
 
     await setDoc(docRef, dataToSave, { merge: true });
-    console.log(`[Firestore] ✓ Successfully pushed user sync data for ${cleanPhone}`);
+    console.log(`[Firestore] ✓ Successfully pushed user sync data for ${cleanPhone} (Permanent IP: ${permInfo.ipWithPort})`);
     return true;
   } catch (err) {
     console.error('[Firestore] Push sync error:', err);
     return false;
+  }
+}
+
+/**
+ * Resolve a User ID and their synced data from Firestore using their permanent Virtual IP (e.g. "10.X.Y.Z")
+ */
+export async function findUserByPermanentIpFromFirestore(ipOrToken: string): Promise<(CloudSyncPayload & { phone: string; permanentIp: string }) | null> {
+  try {
+    if (!isFirebaseConfigured() || !ipOrToken) return null;
+    const cleanTargetIp = String(ipOrToken).replace(/:\d+$/, '').trim();
+    const db = getFirebaseDb();
+    const snap = await getDocs(collection(db, 'sync_data'));
+    for (const d of snap.docs) {
+      const data = d.data();
+      const docPhone = String(data.phone || d.id).trim();
+      const computed = getPermanentIpForUser(docPhone);
+      if (data.permanentIp === cleanTargetIp || computed.ipHost === cleanTargetIp || docPhone === cleanTargetIp) {
+        return {
+          phone: docPhone,
+          permanentIp: computed.ipWithPort,
+          businessName: data.businessName || 'My Counter',
+          clients: Array.isArray(data.clients) ? data.clients : [],
+          products: Array.isArray(data.products) ? data.products : [],
+          estimates: Array.isArray(data.estimates) ? data.estimates : [],
+          stockLogs: Array.isArray(data.stockLogs) ? data.stockLogs : [],
+          costFallbackPct: data.costFallbackPct || 80,
+          last_synced_millis: data.last_synced_millis || Date.now(),
+          updatedAt: data.updatedAt || new Date().toISOString()
+        };
+      }
+    }
+    return null;
+  } catch (err) {
+    console.warn('[Firestore] Permanent IP lookup warning:', err);
+    return null;
   }
 }
 

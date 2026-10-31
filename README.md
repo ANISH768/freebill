@@ -1,4 +1,11 @@
-# BillSync Pro — Offline & Multi-PC Billing System 💻📊
+# BillSync Pro — Offline & Multi-PC Billing System 💻📊 (`v5.1.0`)
+
+> **📌 Current GitHub Release Version:** **`v5.1.0`** *(Updated: Multi-PC Live Sync + Smart CapsLock/TitleCase + Fresh Dashboard)*
+> **🔍 GitHub पर Version कहाँ देखें?**
+> 1. **`README.md`** (इसी पेज के सबसे ऊपर `v5.1.0` लिखा है)
+> 2. **`package.json`** (Line 4 में `"version": "5.1.0"`)
+> 3. **`SECURITY.md`** (`5.1.x` Supported Version टेबल)
+> 4. **GitHub Commit History** (Repo में ऊपर दाईं तरफ **Commits (`clock icon`)** पर क्लिक करके हर अपडेट का टाइम और कोड चेंज देख सकते हैं)
 
 यह गाइड आपको **BillSync Pro (Offline + Cloud Multi-PC Billing System)** को **GitHub से डाउनलोड/क्लोन करके 1 या 2+ कंप्यूटर (PC) पर एक ही सर्वर और एक ही डेटा के साथ** चलाने में मदद करेगी।
 

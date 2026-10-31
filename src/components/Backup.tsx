@@ -2,6 +2,7 @@ import { Download, Upload, Trash2, ShieldAlert, CheckCircle2, CloudLightning, Da
 import { Client, Product, Estimate, User, AuditLog, StockLog } from '../types';
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { encryptData, decryptData } from '../utils/crypto';
+import { getPermanentIpForUser } from '../utils/permanentIp';
 
 interface BackupProps {
   clients: Client[];
@@ -80,27 +81,30 @@ export default function Backup({
   const [showEncryptExportModal, setShowEncryptExportModal] = useState(false);
   const [exportPassphrase, setExportPassphrase] = useState('');
 
-  // Network & Multi-PC Connection Info
+  // Permanent Per-User-ID LAN IP Info (1 fixed, non-changing IP per User ID)
+  const permanentUserIp = getPermanentIpForUser(currentUser);
   const [networkInfo, setNetworkInfo] = useState<{
     port: number;
     hostname: string;
+    permanentIp: string;
     lanUrls: string[];
     cloudSharedUrl: string;
   }>({
     port: 3000,
     hostname: 'localhost',
-    lanUrls: [],
+    permanentIp: permanentUserIp.ipWithPort,
+    lanUrls: [`http://${permanentUserIp.ipWithPort}`],
     cloudSharedUrl: typeof window !== 'undefined' ? window.location.origin : 'https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app'
   });
 
   useEffect(() => {
-    fetch('/api/network-info')
+    fetch(`/api/network-info?phone=${encodeURIComponent(currentUser || '')}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) setNetworkInfo(data);
       })
       .catch(() => {});
-  }, []);
+  }, [currentUser]);
 
   // Scan browser storage for orphaned or old backup data
   const scanBrowserStorage = () => {
@@ -788,87 +792,80 @@ export default function Backup({
         </div>
       )}
 
-      {/* ----------------- 2-PC SAME SERVER & SAME DATA SETUP GUIDE ----------------- */}
-      <div className="bg-white rounded-2xl p-6 border-2 border-blue-200 shadow-xs space-y-4">
+      {/* ----------------- PERMANENT PER-USER-ID LAN IP & 2-PC AUTO-LOGIN SETUP ----------------- */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
-            <span className="inline-block bg-blue-100 text-blue-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider mb-1">
-              🖥️ ↔️ 🖥️ 2 PC Live Multi-Counter Setup
-            </span>
-            <h3 className="text-base font-extrabold text-slate-900">
-              2 PC पर Same Server और Same Data के साथ कैसे चलाएं?
+            <p className="text-xs font-bold text-blue-600">
+              Permanent Per-ID LAN IP · Fixed &amp; Non-Changing
+            </p>
+            <h3 className="text-base font-extrabold text-slate-900 mt-0.5">
+              आपकी ID (+91 {currentUser || '------'}) का स्थायी (Permanent) LAN IP और 2nd PC Auto-Login लिंक
             </h3>
           </div>
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
-            ✓ Auto-Sync Active (Account: {currentUser ? `+91 ${currentUser}` : 'Login Required'})
+          <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl tabular-nums whitespace-nowrap shrink-0">
+            Permanent IP: {permanentUserIp.ipWithPort}
           </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {/* Option 1: Cloud / Internet Server */}
+          {/* Box 1: Single Permanent Per-ID LAN IP (Never Changes) */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
             <div className="font-extrabold text-slate-900 text-sm flex items-center justify-between">
-              <span>🌐 तरीका 1: Internet / Cloud Server (सबसे आसान)</span>
-              <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold">RECOMMENDED</span>
+              <span>1. आपकी ID का एकमात्र स्थायी LAN IP (No Changing IP)</span>
+              <span className="text-[11px] font-mono font-bold text-emerald-700">FIXED FOREVER</span>
             </div>
-            <ol className="list-decimal list-inside space-y-1 text-slate-700 font-medium leading-relaxed">
-              <li><b>PC 1</b> और <b>PC 2</b> दोनों के ब्राउज़र (Chrome/Edge) में नीचे दिया गया <b>Shared Server Link</b> खोलें।</li>
-              <li>दोनों PC में <b>एक ही Mobile Number ({currentUser || 'अपना नंबर'})</b> और <b>Same Password</b> से लॉगिन करें।</li>
-              <li>एक PC पर बिल बनते ही दूसरे PC में <b>Firebase + Cloud Server</b> से अपने आप दिखेगा!</li>
-            </ol>
+            <p className="text-slate-600 font-medium leading-relaxed">
+              हर एक User ID का अलग-अलग और सिर्फ <b>एक ही स्थायी IP Address</b> होता है जो कभी नहीं बदलता (राउटर या Wi-Fi बंद-चालू होने पर भी यही रहेगा):
+            </p>
             <div className="flex items-center gap-2 pt-1">
               <input
                 type="text"
                 readOnly
-                value={typeof window !== 'undefined' ? window.location.origin : networkInfo.cloudSharedUrl}
-                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-800 select-all"
+                value={`http://${permanentUserIp.ipWithPort}`}
+                className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 font-mono font-bold text-xs text-slate-900 tabular-nums select-all"
               />
               <button
                 type="button"
                 onClick={() => {
-                  const url = typeof window !== 'undefined' ? window.location.origin : networkInfo.cloudSharedUrl;
-                  navigator.clipboard?.writeText(url);
-                  setSuccess('✓ Server Link copied! Open this link on your 2nd PC.');
+                  navigator.clipboard?.writeText(`http://${permanentUserIp.ipWithPort}`);
+                  setSuccess(`✓ Permanent LAN IP (http://${permanentUserIp.ipWithPort}) copied!`);
                   setTimeout(() => setSuccess(null), 3500);
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer shrink-0"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-lg text-xs cursor-pointer whitespace-nowrap shrink-0"
               >
-                Copy Link
+                Copy Permanent IP
               </button>
             </div>
           </div>
 
-          {/* Option 2: Offline Local Wi-Fi / LAN Server */}
+          {/* Box 2: Direct 2nd PC Auto-Login Link for this Permanent IP */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
             <div className="font-extrabold text-slate-900 text-sm flex items-center justify-between">
-              <span>🔌 तरीका 2: Offline Same Wi-Fi / LAN Server</span>
-              <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold">LOCAL PC SERVER</span>
+              <span>2. 2nd PC Direct Auto-Login Link (सीधे काउंटर खुलेगा)</span>
+              <span className="text-[11px] font-mono font-bold text-blue-700">AUTO-LOGIN</span>
             </div>
-            <ol className="list-decimal list-inside space-y-1 text-slate-700 font-medium leading-relaxed">
-              <li>सिर्फ <b>PC 1 (Main Counter)</b> पर <code className="bg-slate-200 px-1 rounded font-mono">RUN-ON-PC.bat</code> चलाएं।</li>
-              <li><b>PC 1</b> और <b>PC 2</b> दोनों को एक ही Wi-Fi या LAN केबल राउटर से जोड़ें।</li>
-              <li><b>PC 2</b> में कुछ इंस्टॉल न करें — सीधे ब्राउज़र में PC 1 का <b>LAN IP (`http://192.168.x.x:3000`)</b> खोलें और Same Number से लॉगिन करें।</li>
-            </ol>
+            <p className="text-slate-600 font-medium leading-relaxed">
+              दूसरे PC के ब्राउज़र में यह <b>Permanent IP Link</b> खोलते ही बिना नंबर/पासवर्ड डाले सीधे आपकी इसी ID (<b>+91 {currentUser}</b>) का काउंटर और पूरा लाइव डेटा खुल जाएगा:
+            </p>
             <div className="flex items-center gap-2 pt-1">
               <input
                 type="text"
                 readOnly
-                value={networkInfo.lanUrls[0] || 'http://192.168.1.X:3000 (Check RUN-ON-PC.bat window)'}
-                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-800 select-all"
+                value={permanentUserIp.autoLoginUrl}
+                className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 font-mono font-bold text-xs text-slate-900 tabular-nums select-all"
               />
-              {networkInfo.lanUrls[0] && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(networkInfo.lanUrls[0]);
-                    setSuccess(`✓ LAN Server IP (${networkInfo.lanUrls[0]}) copied!`);
-                    setTimeout(() => setSuccess(null), 3500);
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer shrink-0"
-                >
-                  Copy LAN IP
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(permanentUserIp.autoLoginUrl);
+                  setSuccess(`✓ 2nd PC Auto-Login Link (${permanentUserIp.autoLoginUrl}) copied!`);
+                  setTimeout(() => setSuccess(null), 3500);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3.5 py-2 rounded-lg text-xs cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Copy 2nd-PC Link
+              </button>
             </div>
           </div>
         </div>

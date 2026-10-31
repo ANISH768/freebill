@@ -15,6 +15,7 @@ interface User {
   password?: string;
   clerkPassword?: string;
   businessName: string;
+  permanentIp?: string;
 }
 
 interface UserSyncData {
@@ -22,6 +23,7 @@ interface UserSyncData {
   password?: string;
   clerkPassword?: string;
   businessName: string;
+  permanentIp?: string;
   clients: any[];
   products: any[];
   estimates: any[];
@@ -31,6 +33,25 @@ interface UserSyncData {
 
 const PORT = 3000;
 const DB_FILE_PATH = path.join(process.cwd(), "server_db.json");
+
+function computePermanentIpForPhone(phone: string): { ipHost: string; ipWithPort: string; autoLoginPath: string } {
+  const cleanDigits = String(phone || "")
+    .replace(/\D/g, "")
+    .slice(-10)
+    .padStart(10, "0");
+  const partA = parseInt(cleanDigits.slice(0, 3), 10) || 101;
+  const partB = parseInt(cleanDigits.slice(3, 6), 10) || 102;
+  const partC = parseInt(cleanDigits.slice(6, 10), 10) || 103;
+  const octet2 = 10 + (partA % 240);
+  const octet3 = 10 + (partB % 240);
+  const octet4 = 10 + (partC % 240);
+  const ipHost = `10.${octet2}.${octet3}.${octet4}`;
+  return {
+    ipHost,
+    ipWithPort: `${ipHost}:${PORT}`,
+    autoLoginPath: `/ip/${ipHost}`
+  };
+}
 
 // Helper to load DB
 function loadDb(): { users: User[]; syncData: Record<string, UserSyncData>; backups?: Record<string, any[]>; audit_logs?: any[] } {
@@ -76,6 +97,18 @@ async function startServer() {
   if (!db.audit_logs) {
     db.audit_logs = [];
     dbChanged = true;
+  }
+  // Ensure every existing user has their single permanent, non-changing IP persisted
+  for (const u of db.users) {
+    const perm = computePermanentIpForPhone(u.phone);
+    if (u.permanentIp !== perm.ipWithPort) {
+      u.permanentIp = perm.ipWithPort;
+      dbChanged = true;
+    }
+    if (db.syncData[u.phone] && db.syncData[u.phone].permanentIp !== perm.ipWithPort) {
+      db.syncData[u.phone].permanentIp = perm.ipWithPort;
+      dbChanged = true;
+    }
   }
   if (dbChanged) {
     saveDb(db);
@@ -140,31 +173,87 @@ async function startServer() {
     res.json({ status: "ok", message: "Server is online and ready for syncing!" });
   });
 
-  // Network & Multi-PC Connection Info (returns LAN IPv4 addresses and active server URLs)
+  // Network & Permanent Per-User-ID IP Info
   app.get("/api/network-info", (req, res) => {
     try {
-      const nets = os.networkInterfaces();
-      const lanUrls: string[] = [];
-      for (const name of Object.keys(nets)) {
-        for (const net of nets[name] || []) {
-          if (net.family === "IPv4" && !net.internal) {
-            lanUrls.push(`http://${net.address}:${PORT}`);
-          }
-        }
-      }
+      const queryPhone = String(req.query.phone || "").trim();
+      const perm = computePermanentIpForPhone(queryPhone || "9999999999");
       res.json({
         port: PORT,
         hostname: os.hostname(),
-        lanUrls,
+        permanentIp: perm.ipWithPort,
+        permanentIpHost: perm.ipHost,
+        autoLoginPath: perm.autoLoginPath,
+        lanUrls: [`http://${perm.ipWithPort}`],
         cloudSharedUrl: "https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app"
       });
     } catch (e) {
       res.json({
         port: PORT,
         hostname: "localhost",
-        lanUrls: [],
+        permanentIp: "10.109.109.249:3000",
+        permanentIpHost: "10.109.109.249",
+        autoLoginPath: "/ip/10.109.109.249",
+        lanUrls: ["http://10.109.109.249:3000"],
         cloudSharedUrl: "https://ais-pre-ors5jocb2d3y4wmv3kze4f-914398356752.europe-west2.run.app"
       });
+    }
+  });
+
+  // Resolve a User ID by their Permanent Virtual IP (for instant 2nd-PC Auto-Login)
+  app.get("/api/auth/permanent-ip/:ip", (req, res) => {
+    try {
+      const rawParam = String(req.params.ip || "").trim();
+      const cleanTargetIp = rawParam.replace(/:\d+$/, "").trim();
+      const currentDb = loadDb();
+
+      // Match against registered users in server_db.json
+      let matchedUser = currentDb.users.find(u => {
+        const perm = computePermanentIpForPhone(u.phone);
+        return (
+          perm.ipHost === cleanTargetIp ||
+          perm.ipWithPort === rawParam ||
+          u.permanentIp === rawParam ||
+          u.phone === cleanTargetIp
+        );
+      });
+
+      // Also check syncData keys if user was synced before
+      if (!matchedUser) {
+        for (const phoneKey of Object.keys(currentDb.syncData || {})) {
+          const perm = computePermanentIpForPhone(phoneKey);
+          if (perm.ipHost === cleanTargetIp || perm.ipWithPort === rawParam || phoneKey === cleanTargetIp) {
+            const sd = currentDb.syncData[phoneKey];
+            matchedUser = {
+              phone: phoneKey,
+              password: sd.password || "1234",
+              businessName: sd.businessName || "My Counter",
+              permanentIp: perm.ipWithPort
+            };
+            break;
+          }
+        }
+      }
+
+      if (!matchedUser) {
+        return res.status(404).json({ error: "No User ID found for this Permanent IP." });
+      }
+
+      const perm = computePermanentIpForPhone(matchedUser.phone);
+      const sd = currentDb.syncData[matchedUser.phone];
+      return res.json({
+        success: true,
+        user: {
+          phone: matchedUser.phone,
+          businessName: matchedUser.businessName || sd?.businessName || "My Counter",
+          role: "admin",
+          password: matchedUser.password || sd?.password || "",
+          permanentIp: perm.ipWithPort
+        },
+        syncData: sd || null
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to resolve Permanent IP session." });
     }
   });
 
