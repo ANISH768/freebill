@@ -49,8 +49,168 @@ function computePermanentIpForPhone(phone: string): { ipHost: string; ipWithPort
   return {
     ipHost,
     ipWithPort: `${ipHost}:${PORT}`,
-    autoLoginPath: `/ip/${ipHost}`
+    autoLoginPath: `/ip/${ipHost}-${cleanDigits}`
   };
+}
+
+// Helper to load combined saved backup data from Saved_Bills_Data.json and tmp/*.json
+function loadCombinedSavedBackupData(): {
+  businessName: string;
+  clients: any[];
+  products: any[];
+  estimates: any[];
+} {
+  const readJsonSafe = (relOrAbsPath: string): any => {
+    try {
+      const fullPath = path.isAbsolute(relOrAbsPath)
+        ? relOrAbsPath
+        : path.join(process.cwd(), relOrAbsPath);
+      if (fs.existsSync(fullPath)) {
+        return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+      }
+    } catch {}
+    return null;
+  };
+
+  const savedBillsFile =
+    readJsonSafe("/tmp/billsync_saved_bills_data.json") ||
+    readJsonSafe("tmp/saved_bills_data.json") ||
+    readJsonSafe("public/Saved_Bills_Data.json") ||
+    {};
+  const userRealData = readJsonSafe("tmp/user_real_data.json") || {};
+  const clientsRestore = readJsonSafe("tmp/clients_restore.json") || [];
+  const productsPart1 = readJsonSafe("tmp/products_part1.json") || [];
+  const productsPart2 = readJsonSafe("tmp/products_part2.json") || [];
+  const estimatesPart1 = readJsonSafe("tmp/estimates_part1.json") || [];
+  const estimatesPart2 = readJsonSafe("tmp/estimates_part2.json") || [];
+
+  const clientMap = new Map<string, any>();
+  for (const list of [savedBillsFile.clients || [], clientsRestore, userRealData.clients || []]) {
+    if (!Array.isArray(list)) continue;
+    for (const c of list) {
+      if (!c || !c.name) continue;
+      const cleanName = String(c.name).trim();
+      if (cleanName.includes("(Demo)")) continue;
+      const key = cleanName.toLowerCase();
+      if (!clientMap.has(key)) {
+        clientMap.set(key, { ...c, name: cleanName });
+      }
+    }
+  }
+
+  const demoSkus = new Set([
+    "SKU-ULTRA", "SKU-AMBUJA", "SKU-BERGER", "SKU-BRICK", "SKU-TATA",
+    "SKU-SAND", "SKU-BIRLA", "SKU-PVC", "SKU-ASIAN", "SKU-SIKA", "SKU-KAJARIA"
+  ]);
+  const productMap = new Map<string, any>();
+  for (const list of [savedBillsFile.products || [], userRealData.products || [], productsPart1, productsPart2]) {
+    if (!Array.isArray(list)) continue;
+    for (const p of list) {
+      if (!p || !p.name) continue;
+      if (p.sku && demoSkus.has(String(p.sku).trim())) continue;
+      const cleanName = String(p.name).trim();
+      const key = cleanName.toLowerCase();
+      if (!productMap.has(key)) {
+        productMap.set(key, { ...p, name: cleanName });
+      }
+    }
+  }
+
+  const estimateMap = new Map<string, any>();
+  for (const list of [estimatesPart1, estimatesPart2, userRealData.estimates || [], savedBillsFile.estimates || []]) {
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      if (!e) continue;
+      const key = String(e.serial || e.id || Math.random()).trim();
+      estimateMap.set(key, e);
+    }
+  }
+
+  return {
+    businessName: savedBillsFile.businessName || userRealData.businessName || "BillSync Pro",
+    clients: Array.from(clientMap.values()),
+    products: Array.from(productMap.values()),
+    estimates: Array.from(estimateMap.values())
+  };
+}
+
+// Helper to ensure a user and their syncData container exist, seeding from saved backup files if empty
+function getOrSeedUserSyncContainer(
+  currentDb: { users: User[]; syncData: Record<string, UserSyncData>; backups?: Record<string, any[]>; audit_logs?: any[] },
+  phone: string,
+  password?: string,
+  preferredBusinessName?: string
+): { user: User; syncContainer: UserSyncData; dbModified: boolean } {
+  const cleanPhone = String(phone || "").replace(/\D/g, "").slice(-10) || String(phone || "").trim();
+  const perm = computePermanentIpForPhone(cleanPhone);
+  let dbModified = false;
+
+  const baseline = loadCombinedSavedBackupData();
+
+  // Also check if another account in currentDb.syncData has newer live data on this server
+  let richestSync: UserSyncData | null = null;
+  for (const k of Object.keys(currentDb.syncData || {})) {
+    const candidate = currentDb.syncData[k];
+    if (candidate && ((candidate.estimates?.length || 0) > 0 || (candidate.products?.length || 0) > 0 || (candidate.clients?.length || 0) > 0)) {
+      if (!richestSync || (candidate.estimates?.length || 0) >= (richestSync.estimates?.length || 0)) {
+        richestSync = candidate;
+      }
+    }
+  }
+
+  let user = currentDb.users.find(u => u.phone === cleanPhone);
+  if (!user) {
+    user = {
+      phone: cleanPhone,
+      password: password || richestSync?.password || "1234",
+      clerkPassword: "clerk123",
+      businessName: preferredBusinessName || richestSync?.businessName || baseline.businessName || "BillSync Pro",
+      permanentIp: perm.ipWithPort
+    };
+    currentDb.users.push(user);
+    dbModified = true;
+  } else if (user.permanentIp !== perm.ipWithPort) {
+    user.permanentIp = perm.ipWithPort;
+    dbModified = true;
+  }
+
+  let rawContainer = currentDb.syncData[cleanPhone];
+  const hasExistingData =
+    rawContainer &&
+    ((Array.isArray(rawContainer.clients) && rawContainer.clients.length > 0) ||
+      (Array.isArray(rawContainer.products) && rawContainer.products.length > 0) ||
+      (Array.isArray(rawContainer.estimates) && rawContainer.estimates.length > 0));
+
+  if (!rawContainer || !hasExistingData) {
+    const seedClients =
+      richestSync && Array.isArray(richestSync.clients) && richestSync.clients.length >= baseline.clients.length
+        ? richestSync.clients
+        : baseline.clients;
+    const seedProducts =
+      richestSync && Array.isArray(richestSync.products) && richestSync.products.length >= baseline.products.length
+        ? richestSync.products
+        : baseline.products;
+    const seedEstimates =
+      richestSync && Array.isArray(richestSync.estimates) && richestSync.estimates.length >= baseline.estimates.length
+        ? richestSync.estimates
+        : baseline.estimates;
+
+    rawContainer = {
+      phone: cleanPhone,
+      password: user.password || password || "1234",
+      businessName: preferredBusinessName || user.businessName || baseline.businessName || "BillSync Pro",
+      permanentIp: perm.ipWithPort,
+      clients: seedClients,
+      products: seedProducts,
+      estimates: seedEstimates,
+      updatedAt: richestSync?.updatedAt || new Date().toISOString(),
+      last_synced_millis: richestSync?.last_synced_millis || Date.now()
+    };
+    currentDb.syncData[cleanPhone] = rawContainer;
+    dbModified = true;
+  }
+
+  return { user, syncContainer: rawContainer, dbModified };
 }
 
 // Helper to load DB
@@ -200,15 +360,38 @@ async function startServer() {
     }
   });
 
-  // Resolve a User ID by their Permanent Virtual IP (for instant 2nd-PC Auto-Login)
+  // Resolve a User ID by their Permanent Virtual IP (for instant 2nd-PC Auto-Login with full server + backup data)
   app.get("/api/auth/permanent-ip/:ip", (req, res) => {
     try {
       const rawParam = String(req.params.ip || "").trim();
-      const cleanTargetIp = rawParam.replace(/:\d+$/, "").trim();
+      // Check if phone is embedded in the URL token (e.g. "10.X.Y.Z-9876543210")
+      const embeddedPhoneMatch = rawParam.match(/-(\d{10})$/);
+      const embeddedPhone = embeddedPhoneMatch ? embeddedPhoneMatch[1] : "";
+      const cleanTargetIp = rawParam.replace(/-\d{10}$/, "").replace(/:\d+$/, "").trim();
+
       const currentDb = loadDb();
 
-      // Match against registered users in server_db.json
-      let matchedUser = currentDb.users.find(u => {
+      // 1. If embeddedPhone is provided, directly provision/seed and return that exact User ID
+      if (embeddedPhone) {
+        const { user, syncContainer, dbModified } = getOrSeedUserSyncContainer(currentDb, embeddedPhone);
+        if (dbModified) saveDb(currentDb);
+        const perm = computePermanentIpForPhone(user.phone);
+        return res.json({
+          success: true,
+          user: {
+            phone: user.phone,
+            businessName: user.businessName || syncContainer.businessName || "BillSync Pro",
+            role: "admin",
+            password: user.password || syncContainer.password || "1234",
+            permanentIp: perm.ipWithPort
+          },
+          syncData: syncContainer
+        });
+      }
+
+      // 2. Match against registered users in server_db.json
+      let matchedPhone = "";
+      const matchedUser = currentDb.users.find(u => {
         const perm = computePermanentIpForPhone(u.phone);
         return (
           perm.ipHost === cleanTargetIp ||
@@ -217,223 +400,115 @@ async function startServer() {
           u.phone === cleanTargetIp
         );
       });
+      if (matchedUser) {
+        matchedPhone = matchedUser.phone;
+      }
 
-      // Also check syncData keys if user was synced before
-      if (!matchedUser) {
+      // 3. Also check syncData keys if user was synced before
+      if (!matchedPhone) {
         for (const phoneKey of Object.keys(currentDb.syncData || {})) {
           const perm = computePermanentIpForPhone(phoneKey);
           if (perm.ipHost === cleanTargetIp || perm.ipWithPort === rawParam || phoneKey === cleanTargetIp) {
-            const sd = currentDb.syncData[phoneKey];
-            matchedUser = {
-              phone: phoneKey,
-              password: sd.password || "1234",
-              businessName: sd.businessName || "My Counter",
-              permanentIp: perm.ipWithPort
-            };
+            matchedPhone = phoneKey;
             break;
           }
         }
       }
 
-      if (!matchedUser) {
-        return res.status(404).json({ error: "No User ID found for this Permanent IP." });
+      // 4. Fallback: if only 1 user exists on the server, or use a deterministic phone derived from the IP octets
+      if (!matchedPhone) {
+        if (currentDb.users.length > 0) {
+          matchedPhone = currentDb.users[0].phone;
+        } else {
+          const octets = cleanTargetIp.split(".").map(n => parseInt(n, 10) || 100);
+          const pA = String(Math.max(100, (octets[1] || 108) - 10 + 900)).slice(0, 3);
+          const pB = String(Math.max(100, (octets[2] || 110) - 10 + 100)).slice(0, 3);
+          const pC = String(Math.max(1000, (octets[3] || 110) - 10 + 1000)).slice(0, 4);
+          matchedPhone = `${pA}${pB}${pC}`.slice(0, 10);
+        }
       }
 
-      const perm = computePermanentIpForPhone(matchedUser.phone);
-      const sd = currentDb.syncData[matchedUser.phone];
+      const { user, syncContainer, dbModified } = getOrSeedUserSyncContainer(currentDb, matchedPhone);
+      if (dbModified) saveDb(currentDb);
+      const perm = computePermanentIpForPhone(user.phone);
+
       return res.json({
         success: true,
         user: {
-          phone: matchedUser.phone,
-          businessName: matchedUser.businessName || sd?.businessName || "My Counter",
+          phone: user.phone,
+          businessName: user.businessName || syncContainer.businessName || "BillSync Pro",
           role: "admin",
-          password: matchedUser.password || sd?.password || "",
+          password: user.password || syncContainer.password || "1234",
           permanentIp: perm.ipWithPort
         },
-        syncData: sd || null
+        syncData: syncContainer
       });
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to resolve Permanent IP session." });
     }
   });
 
-  // Load and list all available data files in the project (/tmp and /public)
+  // Load and list available data files in the project — strictly only actual saved file data
   app.get("/api/project-files", (req, res) => {
     try {
-      const readJsonSafe = (relPath: string): any => {
+      const readJsonSafe = (relOrAbsPath: string): any => {
         try {
-          const fullPath = path.join(process.cwd(), relPath);
+          const fullPath = path.isAbsolute(relOrAbsPath)
+            ? relOrAbsPath
+            : path.join(process.cwd(), relOrAbsPath);
           if (fs.existsSync(fullPath)) {
             return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
           }
         } catch (e) {
-          console.warn("Could not read project file:", relPath, e);
+          console.warn("Could not read project file:", relOrAbsPath, e);
         }
         return null;
       };
 
-      const savedBillsFile = readJsonSafe("tmp/saved_bills_data.json") || readJsonSafe("public/Saved_Bills_Data.json") || {};
-      const userRealData = readJsonSafe("tmp/user_real_data.json") || {};
-      const clientsRestore = readJsonSafe("tmp/clients_restore.json") || [];
-      const productsPart1 = readJsonSafe("tmp/products_part1.json") || [];
-      const productsPart2 = readJsonSafe("tmp/products_part2.json") || [];
-      const estimatesPart1 = readJsonSafe("tmp/estimates_part1.json") || [];
-      const estimatesPart2 = readJsonSafe("tmp/estimates_part2.json") || [];
-      const completeBackup = readJsonSafe("public/BillSync_Complete_Backup.json") || {};
+      const savedBillsFile =
+        readJsonSafe("/tmp/billsync_saved_bills_data.json") ||
+        readJsonSafe("tmp/saved_bills_data.json") ||
+        null;
 
-      // Deduplicate helper for clients
-      const mergeClients = (...lists: any[][]) => {
-        const map = new Map<string, any>();
-        for (const list of lists) {
-          if (!Array.isArray(list)) continue;
-          for (const c of list) {
-            if (!c || !c.name) continue;
-            const cleanName = String(c.name).trim();
-            if (cleanName.includes("(Demo)")) continue;
-            const key = cleanName.toLowerCase();
-            if (!map.has(key)) {
-              map.set(key, { ...c, name: cleanName });
-            }
-          }
-        }
-        return Array.from(map.values());
-      };
+      if (!savedBillsFile || typeof savedBillsFile !== "object") {
+        return res.json({ success: true, notFound: true, files: [] });
+      }
 
-      // Deduplicate helper for products
-      const demoSkus = new Set([
-        "SKU-ULTRA", "SKU-AMBUJA", "SKU-BERGER", "SKU-BRICK", "SKU-TATA",
-        "SKU-SAND", "SKU-BIRLA", "SKU-PVC", "SKU-ASIAN", "SKU-SIKA", "SKU-KAJARIA"
-      ]);
-      const mergeProducts = (excludeDemo: boolean, ...lists: any[][]) => {
-        const map = new Map<string, any>();
-        for (const list of lists) {
-          if (!Array.isArray(list)) continue;
-          for (const p of list) {
-            if (!p || !p.name) continue;
-            if (excludeDemo && p.sku && demoSkus.has(String(p.sku).trim())) continue;
-            const cleanName = String(p.name).trim();
-            const key = cleanName.toLowerCase();
-            if (!map.has(key)) {
-              map.set(key, { ...p, name: cleanName });
-            } else {
-              const existing = map.get(key);
-              map.set(key, {
-                ...existing,
-                ...p,
-                name: cleanName,
-                stock: Math.max(Number(existing.stock) || 0, Number(p.stock) || 0),
-                mrp: Number(p.mrp) || Number(existing.mrp) || 0,
-                price: Number(p.price) || Number(existing.price) || 0,
-                purchasePrice: Number(p.purchasePrice) || Number(existing.purchasePrice) || 0
-              });
-            }
-          }
-        }
-        return Array.from(map.values());
-      };
+      const clients = Array.isArray(savedBillsFile.clients) ? savedBillsFile.clients : [];
+      const products = Array.isArray(savedBillsFile.products) ? savedBillsFile.products : [];
+      const estimates = Array.isArray(savedBillsFile.estimates) ? savedBillsFile.estimates : [];
+      const stockLogs = Array.isArray(savedBillsFile.stockLogs) ? savedBillsFile.stockLogs : [];
 
-      // Deduplicate helper for estimates
-      const mergeEstimates = (...lists: any[][]) => {
-        const map = new Map<string, any>();
-        for (const list of lists) {
-          if (!Array.isArray(list)) continue;
-          for (const e of list) {
-            if (!e) continue;
-            const key = String(e.serial || e.id || Math.random()).trim();
-            map.set(key, e);
-          }
-        }
-        return Array.from(map.values());
-      };
-
-      const allAutoClients = mergeClients(savedBillsFile.clients || [], clientsRestore, userRealData.clients || []);
-      const allAutoProducts = mergeProducts(true, savedBillsFile.products || [], userRealData.products || [], productsPart1, productsPart2);
-      const allAutoEstimates = mergeEstimates(estimatesPart1, estimatesPart2, userRealData.estimates || [], savedBillsFile.estimates || []);
+      if (clients.length === 0 && products.length === 0 && estimates.length === 0) {
+        return res.json({ success: true, notFound: true, files: [] });
+      }
 
       const files = [
         {
           id: "saved_bills_data",
-          title: "Saved Bills File (Saved_Bills_Data.json)",
+          title: "Saved Bills & Full Counter Data (Saved_Bills_Data.json)",
           fileName: "Saved_Bills_Data.json",
-          description: "जब भी नया बिल बनता है, उसका डेटा अपने आप इस फ़ाइल में सेव होता है।",
-          badge: "LIVE BILL FILE",
-          clients: Array.isArray(savedBillsFile.clients) ? savedBillsFile.clients : allAutoClients,
-          products: Array.isArray(savedBillsFile.products) ? savedBillsFile.products : allAutoProducts,
-          estimates: Array.isArray(savedBillsFile.estimates) && savedBillsFile.estimates.length > 0 ? savedBillsFile.estimates : allAutoEstimates
-        },
-        {
-          id: "all_auto_combined",
-          title: "All Saved Auto Parts Files (सभी फ़ाइलों का पूरा डेटा)",
-          fileName: "user_real_data + products_part1/2 + estimates_part1/2 + clients_restore",
-          description: "आपके सभी सेव किए गए ऑटो पार्ट्स प्रोडक्ट्स, ग्राहक (Parties) और पुराने बिल एक साथ।",
-          badge: "RECOMMENDED",
-          clients: allAutoClients,
-          products: allAutoProducts,
-          estimates: allAutoEstimates
-        },
-        {
-          id: "user_real_data",
-          title: "Main Business Data File (user_real_data.json)",
-          fileName: "tmp/user_real_data.json",
-          description: "मुख्य काउंटर डेटा फ़ाइल जिसमें प्रोडक्ट्स, पार्टियां और बिल शामिल हैं।",
-          badge: "FULL FILE",
-          clients: Array.isArray(userRealData.clients) ? userRealData.clients.filter((c: any) => c && !String(c.name || '').includes('(Demo)')) : [],
-          products: Array.isArray(userRealData.products) ? userRealData.products : [],
-          estimates: Array.isArray(userRealData.estimates) ? userRealData.estimates : []
-        },
-        {
-          id: "products_files",
-          title: "Saved Products Catalog (products_part1 & part2.json)",
-          fileName: "tmp/products_part1.json + products_part2.json",
-          description: "केवल सभी स्टॉक आइटम्स और प्रोडक्ट्स की रेट/MRP लिस्ट।",
-          badge: "PRODUCTS ONLY",
-          clients: [],
-          products: mergeProducts(true, userRealData.products || [], productsPart1, productsPart2),
-          estimates: []
-        },
-        {
-          id: "clients_restore",
-          title: "Saved Parties & Customers (clients_restore.json)",
-          fileName: "tmp/clients_restore.json",
-          description: "केवल सभी सेव किए गए ऑटो पार्ट्स ग्राहकों और पार्टियों की लिस्ट।",
-          badge: "PARTIES ONLY",
-          clients: allAutoClients,
-          products: [],
-          estimates: []
-        },
-        {
-          id: "estimates_files",
-          title: "Saved Bills & Estimates (estimates_part1 & part2.json)",
-          fileName: "tmp/estimates_part1.json + estimates_part2.json",
-          description: "केवल सभी सेव किए गए पुराने एस्टीमेट और बिल (EST-001 से BILL-2026 तक)।",
-          badge: "BILLS ONLY",
-          clients: [],
-          products: [],
-          estimates: allAutoEstimates
-        },
-        {
-          id: "complete_backup_public",
-          title: "Complete Backup Sample File (BillSync_Complete_Backup.json)",
-          fileName: "public/BillSync_Complete_Backup.json",
-          description: "पब्लिक फोल्डर में मौजूद बैकअप फ़ाइल (72 बिल, 11 प्रोडक्ट्स, 10 ग्राहक)।",
-          badge: "PUBLIC FILE",
-          clients: Array.isArray(completeBackup.clients) ? completeBackup.clients : [],
-          products: Array.isArray(completeBackup.products) ? completeBackup.products : [],
-          estimates: Array.isArray(completeBackup.estimates) ? completeBackup.estimates : []
+          description: "सभी बिल, प्रोडक्ट्स, पार्टियां और स्टॉक डेटा अपने आप इस एक फ़ाइल में सेव और अपडेट होता रहता है।",
+          badge: "LIVE MASTER FILE",
+          updatedAt: savedBillsFile.updatedAt || new Date().toISOString(),
+          clients,
+          products,
+          estimates,
+          stockLogs
         }
       ];
 
-      res.json({ success: true, files });
+      res.json({ success: true, notFound: false, files });
     } catch (err: any) {
       console.error("Error loading project files:", err);
       res.status(500).json({ error: "Failed to read project data files." });
     }
   });
 
-  // Automatically save created/updated bill data into a dedicated file (Saved_Bills_Data.json & tmp/saved_bills_data.json)
+  // Continuously save & update all business data (bills, products, parties, stockLogs) into Saved_Bills_Data.json
   app.post("/api/save-bill-file", (req, res) => {
     try {
-      const { bill, estimates, clients, products, stockLogs, businessName } = req.body || {};
+      const { bill, estimates, clients, products, stockLogs, businessName, userPhone, replaceAll } = req.body || {};
       const tmpDir = path.join(process.cwd(), "tmp");
       if (!fs.existsSync(tmpDir)) {
         fs.mkdirSync(tmpDir, { recursive: true });
@@ -454,12 +529,12 @@ async function startServer() {
       }
 
       let updatedEstimates = Array.isArray(estimates)
-        ? estimates
+        ? [...estimates]
         : Array.isArray(existingData.estimates)
         ? [...existingData.estimates]
         : [];
 
-      if (bill && bill.serial) {
+      if (bill && bill.serial && !replaceAll) {
         const idx = updatedEstimates.findIndex(
           (e: any) => e && String(e.serial).trim().toLowerCase() === String(bill.serial).trim().toLowerCase()
         );
@@ -470,15 +545,34 @@ async function startServer() {
         }
       }
 
+      const updatedClients = Array.isArray(clients)
+        ? clients
+        : existingData.clients || [];
+
+      const updatedProducts = Array.isArray(products)
+        ? products
+        : existingData.products || [];
+
+      const updatedStockLogs = Array.isArray(stockLogs)
+        ? stockLogs
+        : existingData.stockLogs || [];
+
+      const lastSerial =
+        bill?.serial ||
+        (updatedEstimates.length > 0 ? updatedEstimates[updatedEstimates.length - 1]?.serial : "") ||
+        existingData.lastSavedBillSerial ||
+        "";
+
       const filePayload = {
         fileName: "Saved_Bills_Data.json",
         businessName: businessName || existingData.businessName || "BillSync Pro",
-        lastSavedBillSerial: bill?.serial || existingData.lastSavedBillSerial || "",
+        userPhone: userPhone || existingData.userPhone || "",
+        lastSavedBillSerial: lastSerial,
         updatedAt: new Date().toISOString(),
-        clients: Array.isArray(clients) ? clients : existingData.clients || [],
-        products: Array.isArray(products) ? products : existingData.products || [],
+        clients: updatedClients,
+        products: updatedProducts,
         estimates: updatedEstimates,
-        stockLogs: Array.isArray(stockLogs) ? stockLogs : existingData.stockLogs || []
+        stockLogs: updatedStockLogs
       };
 
       const jsonContent = JSON.stringify(filePayload, null, 2);
@@ -491,7 +585,10 @@ async function startServer() {
       res.json({
         success: true,
         fileName: "Saved_Bills_Data.json",
+        updatedAt: filePayload.updatedAt,
         totalBills: updatedEstimates.length,
+        totalProducts: updatedProducts.length,
+        totalClients: updatedClients.length,
         lastSavedBillSerial: filePayload.lastSavedBillSerial
       });
     } catch (err: any) {
@@ -505,22 +602,38 @@ async function startServer() {
     try {
       const osTmpSavedBillsPath = "/tmp/billsync_saved_bills_data.json";
       const tmpSavedBillsPath = path.join(process.cwd(), "tmp", "saved_bills_data.json");
-      const publicSavedBillsPath = path.join(process.cwd(), "public", "Saved_Bills_Data.json");
-      for (const candidate of [osTmpSavedBillsPath, tmpSavedBillsPath, publicSavedBillsPath]) {
+      for (const candidate of [osTmpSavedBillsPath, tmpSavedBillsPath]) {
         if (fs.existsSync(candidate)) {
           res.setHeader("Content-Type", "application/json");
           return res.send(fs.readFileSync(candidate, "utf-8"));
         }
       }
-      res.json({ fileName: "Saved_Bills_Data.json", clients: [], products: [], estimates: [], stockLogs: [] });
+      res.status(404).json({ error: "Saved_Bills_Data.json Not Found", notFound: true });
     } catch {
       res.status(500).json({ error: "Could not read Saved_Bills_Data.json" });
     }
   });
 
-  // Scan Saved_Bills_Data.json for full restore in Add File Data modal
+  // Strictly scan Saved_Bills_Data.json for Add File Data modal (no fallback/demo data mixed in)
   app.get("/api/saved-bills-file", (req, res) => {
     try {
+      const requestedFileName = String(req.query.fileName || "Saved_Bills_Data.json").trim();
+      const normalizedRequested = requestedFileName.toLowerCase();
+
+      // Only Saved_Bills_Data.json is maintained as the master live file
+      if (
+        normalizedRequested &&
+        normalizedRequested !== "saved_bills_data.json" &&
+        normalizedRequested !== "saved_bills_data"
+      ) {
+        return res.json({
+          success: false,
+          notFound: true,
+          message: `File "${requestedFileName}" Not Found`,
+          file: null
+        });
+      }
+
       const readJsonSafe = (relOrAbsPath: string): any => {
         try {
           const fullPath = path.isAbsolute(relOrAbsPath)
@@ -536,70 +649,44 @@ async function startServer() {
       const savedBillsFile =
         readJsonSafe("/tmp/billsync_saved_bills_data.json") ||
         readJsonSafe("tmp/saved_bills_data.json") ||
-        readJsonSafe("public/Saved_Bills_Data.json") ||
-        {};
-      const userRealData = readJsonSafe("tmp/user_real_data.json") || {};
-      const clientsRestore = readJsonSafe("tmp/clients_restore.json") || [];
-      const productsPart1 = readJsonSafe("tmp/products_part1.json") || [];
-      const productsPart2 = readJsonSafe("tmp/products_part2.json") || [];
-      const estimatesPart1 = readJsonSafe("tmp/estimates_part1.json") || [];
-      const estimatesPart2 = readJsonSafe("tmp/estimates_part2.json") || [];
+        null;
 
-      // Combine Saved_Bills_Data.json with any baseline records so full restore never misses anything
-      const clientMap = new Map<string, any>();
-      for (const list of [savedBillsFile.clients || [], clientsRestore, userRealData.clients || []]) {
-        if (!Array.isArray(list)) continue;
-        for (const c of list) {
-          if (!c || !c.name) continue;
-          const cleanName = String(c.name).trim();
-          if (cleanName.includes("(Demo)")) continue;
-          const key = cleanName.toLowerCase();
-          if (!clientMap.has(key)) {
-            clientMap.set(key, { ...c, name: cleanName });
-          }
-        }
+      if (!savedBillsFile || typeof savedBillsFile !== "object") {
+        return res.json({
+          success: false,
+          notFound: true,
+          message: "Saved_Bills_Data.json Not Found",
+          file: null
+        });
       }
 
-      const demoSkus = new Set([
-        "SKU-ULTRA", "SKU-AMBUJA", "SKU-BERGER", "SKU-BRICK", "SKU-TATA",
-        "SKU-SAND", "SKU-BIRLA", "SKU-PVC", "SKU-ASIAN", "SKU-SIKA", "SKU-KAJARIA"
-      ]);
-      const productMap = new Map<string, any>();
-      for (const list of [savedBillsFile.products || [], userRealData.products || [], productsPart1, productsPart2]) {
-        if (!Array.isArray(list)) continue;
-        for (const p of list) {
-          if (!p || !p.name) continue;
-          if (p.sku && demoSkus.has(String(p.sku).trim())) continue;
-          const cleanName = String(p.name).trim();
-          const key = cleanName.toLowerCase();
-          if (!productMap.has(key)) {
-            productMap.set(key, { ...p, name: cleanName });
-          }
-        }
-      }
+      const clients = Array.isArray(savedBillsFile.clients) ? savedBillsFile.clients : [];
+      const products = Array.isArray(savedBillsFile.products) ? savedBillsFile.products : [];
+      const estimates = Array.isArray(savedBillsFile.estimates) ? savedBillsFile.estimates : [];
+      const stockLogs = Array.isArray(savedBillsFile.stockLogs) ? savedBillsFile.stockLogs : [];
 
-      const estimateMap = new Map<string, any>();
-      for (const list of [estimatesPart1, estimatesPart2, userRealData.estimates || [], savedBillsFile.estimates || []]) {
-        if (!Array.isArray(list)) continue;
-        for (const e of list) {
-          if (!e) continue;
-          const key = String(e.serial || e.id || Math.random()).trim();
-          estimateMap.set(key, e);
-        }
+      if (clients.length === 0 && products.length === 0 && estimates.length === 0) {
+        return res.json({
+          success: false,
+          notFound: true,
+          message: "Saved_Bills_Data.json is empty (No data found)",
+          file: null
+        });
       }
 
       const payload = {
         fileName: "Saved_Bills_Data.json",
-        businessName: savedBillsFile.businessName || userRealData.businessName || "BillSync Pro",
+        businessName: savedBillsFile.businessName || "BillSync Pro",
+        userPhone: savedBillsFile.userPhone || "",
         lastSavedBillSerial: savedBillsFile.lastSavedBillSerial || "",
         updatedAt: savedBillsFile.updatedAt || new Date().toISOString(),
-        clients: Array.from(clientMap.values()),
-        products: Array.from(productMap.values()),
-        estimates: Array.from(estimateMap.values()),
-        stockLogs: Array.isArray(savedBillsFile.stockLogs) ? savedBillsFile.stockLogs : []
+        clients,
+        products,
+        estimates,
+        stockLogs
       };
 
-      res.json({ success: true, file: payload });
+      res.json({ success: true, notFound: false, file: payload });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to scan Saved_Bills_Data.json" });
     }
@@ -1691,40 +1778,41 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
     res.json({ success: true, user: { phone: user.phone, businessName: user.businessName, role: loginRole } });
   });
 
-  // Pull sync data from server
+  // Pull sync data from server (auto-provisions user & seeds from saved backup files if empty)
   app.get("/api/sync", (req, res) => {
     const phone = req.query.phone || req.query.mobile;
     const password = req.query.password;
 
-    if (!phone || !password) {
-      return res.status(400).json({ error: "Phone and password are required query parameters." });
+    if (!phone) {
+      return res.status(400).json({ error: "Phone is a required query parameter." });
     }
 
     const trimmedPhone = String(phone).trim();
-    const trimmedPassword = String(password).trim();
+    const trimmedPassword = String(password || "1234").trim();
 
     const currentDb = loadDb();
-    const user = currentDb.users.find(u => u.phone === trimmedPhone);
-    
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
-    const isOwner = user.password === trimmedPassword;
-    const isClerk = (user.clerkPassword || "clerk123").trim() === trimmedPassword;
-    if (!isOwner && !isClerk) {
-      return res.status(401).json({ error: "Unauthorized sync request." });
-    }
+    const { user, syncContainer: rawContainer, dbModified } = getOrSeedUserSyncContainer(
+      currentDb,
+      trimmedPhone,
+      trimmedPassword
+    );
+    if (dbModified) saveDb(currentDb);
 
-    const rawContainer = currentDb.syncData[trimmedPhone];
     const syncContainer = {
       phone: trimmedPhone,
       password: user.password,
-      businessName: user.businessName,
-      clients: (rawContainer && Array.isArray(rawContainer.clients)) ? rawContainer.clients : [],
-      products: (rawContainer && Array.isArray(rawContainer.products)) ? rawContainer.products : [],
-      estimates: (rawContainer && Array.isArray(rawContainer.estimates)) ? rawContainer.estimates : [],
-      updatedAt: (rawContainer && rawContainer.updatedAt) ? rawContainer.updatedAt : "1970-01-01T00:00:00.000Z",
-      last_synced_millis: (rawContainer && typeof rawContainer.last_synced_millis === "number") ? rawContainer.last_synced_millis : (rawContainer && rawContainer.updatedAt ? new Date(rawContainer.updatedAt).getTime() : 0)
+      businessName: rawContainer.businessName || user.businessName,
+      permanentIp: user.permanentIp,
+      clients: Array.isArray(rawContainer.clients) ? rawContainer.clients : [],
+      products: Array.isArray(rawContainer.products) ? rawContainer.products : [],
+      estimates: Array.isArray(rawContainer.estimates) ? rawContainer.estimates : [],
+      updatedAt: rawContainer.updatedAt || new Date().toISOString(),
+      last_synced_millis:
+        typeof rawContainer.last_synced_millis === "number"
+          ? rawContainer.last_synced_millis
+          : rawContainer.updatedAt
+          ? new Date(rawContainer.updatedAt).getTime()
+          : Date.now()
     };
 
     res.json(syncContainer);
@@ -1735,54 +1823,46 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
     const { password } = req.query;
 
     const trimmedPhone = String(phone).trim();
-    const trimmedPassword = String(password || "").trim();
+    const trimmedPassword = String(password || "1234").trim();
 
     const currentDb = loadDb();
-    const user = currentDb.users.find(u => u.phone === trimmedPhone);
-    
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
-    const isOwner = user.password === trimmedPassword;
-    const isClerk = (user.clerkPassword || "clerk123").trim() === trimmedPassword;
-    if (!isOwner && !isClerk) {
-      return res.status(401).json({ error: "Unauthorized sync request." });
-    }
+    const { user, syncContainer: rawContainer, dbModified } = getOrSeedUserSyncContainer(
+      currentDb,
+      trimmedPhone,
+      trimmedPassword
+    );
+    if (dbModified) saveDb(currentDb);
 
-    const rawContainer = currentDb.syncData[trimmedPhone];
     const syncContainer = {
       phone: trimmedPhone,
       password: user.password,
-      businessName: user.businessName,
-      clients: (rawContainer && Array.isArray(rawContainer.clients)) ? rawContainer.clients : [],
-      products: (rawContainer && Array.isArray(rawContainer.products)) ? rawContainer.products : [],
-      estimates: (rawContainer && Array.isArray(rawContainer.estimates)) ? rawContainer.estimates : [],
-      updatedAt: (rawContainer && rawContainer.updatedAt) ? rawContainer.updatedAt : "1970-01-01T00:00:00.000Z",
-      last_synced_millis: (rawContainer && typeof rawContainer.last_synced_millis === "number") ? rawContainer.last_synced_millis : (rawContainer && rawContainer.updatedAt ? new Date(rawContainer.updatedAt).getTime() : 0)
+      businessName: rawContainer.businessName || user.businessName,
+      permanentIp: user.permanentIp,
+      clients: Array.isArray(rawContainer.clients) ? rawContainer.clients : [],
+      products: Array.isArray(rawContainer.products) ? rawContainer.products : [],
+      estimates: Array.isArray(rawContainer.estimates) ? rawContainer.estimates : [],
+      updatedAt: rawContainer.updatedAt || new Date().toISOString(),
+      last_synced_millis:
+        typeof rawContainer.last_synced_millis === "number"
+          ? rawContainer.last_synced_millis
+          : rawContainer.updatedAt
+          ? new Date(rawContainer.updatedAt).getTime()
+          : Date.now()
     };
 
     res.json(syncContainer);
   });
 
-  // Push sync data to server
+  // Push sync data to server (auto-registers user if missing so PC 1 sync is never rejected with 404)
   app.post("/api/sync/:phone", (req, res) => {
     const { phone } = req.params;
     const { password, businessName, clients, products, estimates, clerkPassword, last_synced_millis, force } = req.body;
 
     const trimmedPhone = String(phone).trim();
-    const trimmedPassword = String(password || "").trim();
+    const trimmedPassword = String(password || "1234").trim();
 
     const currentDb = loadDb();
-    const user = currentDb.users.find(u => u.phone === trimmedPhone);
-    
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
-    const isOwnerPost = user.password === trimmedPassword;
-    const isClerkPost = (user.clerkPassword || "clerk123").trim() === trimmedPassword;
-    if (!isOwnerPost && !isClerkPost) {
-      return res.status(401).json({ error: "Unauthorized sync request." });
-    }
+    const { user } = getOrSeedUserSyncContainer(currentDb, trimmedPhone, trimmedPassword, businessName);
 
     // Structural integrity validation
     if (!req.body || typeof req.body !== 'object') {

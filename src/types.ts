@@ -110,9 +110,20 @@ export interface Estimate {
   voidReason?: string;
   signature?: string;
   invoiceTheme?: SecondaryPrintStyle;
+  isGstInvoice?: boolean;
 }
 
-export type SecondaryPrintStyle = 'estimate' | 'modern' | 'classic_gst' | 'minimal' | 'wholesale' | 'stylish';
+export type SecondaryPrintStyle =
+  | 'estimate'
+  | 'modern'
+  | 'classic_gst'
+  | 'minimal'
+  | 'wholesale'
+  | 'stylish'
+  | 'tally_prime_gst'
+  | 'tally_prime_non_gst'
+  | 'tally_erp9_gst'
+  | 'tally_simple_estimate';
 
 export interface PrintTemplateConfig {
   layout: 'A4' | 'A5' | 'THERMAL_80' | 'THERMAL_58';
@@ -160,10 +171,20 @@ export interface User {
   phone: string;
   password: string;
   businessName: string;
+  ownerName?: string;
+  businessType?: string;
+  address?: string;
+  state?: string;
   email?: string;
   gstin?: string;
   upiId?: string;
   clerkPassword?: string;
+  invoicePrefix?: string;
+  accentColor?: string;
+  logoUrl?: string;
+  recoveryCode?: string;
+  securityQuestion?: string;
+  securityAnswer?: string;
 }
 
 export interface StockLog {
@@ -182,15 +203,59 @@ export interface StockLog {
   userPhone?: string;
 }
 
+export type SystemAuditAction =
+  | 'BILL_CREATED'
+  | 'BILL_EDITED'
+  | 'BILL_DELETED'
+  | 'BILL_CANCELLED'
+  | 'HEALTH_CHECK_REPAIR'
+  | 'STOCK_ADJUSTED'
+  | 'CLIENT_ADDED'
+  | 'PRODUCT_ADDED'
+  | 'PRICE_CHANGED'
+  | 'PAYMENT_COLLECTED'
+  | 'LOGIN'
+  | 'FAILED_LOGIN'
+  | 'PASSWORD_RESET'
+  | 'BACKUP_EXPORTED'
+  | 'RESTORE_DATA'
+  | 'SETTINGS_CHANGED'
+  | 'DATABASE_RESET'
+  | 'OTP_ATTEMPT_SUCCESS'
+  | 'OTP_ATTEMPT_FAILURE';
+
 export interface AuditLog {
   id?: number;
   timestamp: string;
   userId: string;
   userName: string;
   userRole: 'admin' | 'clerk';
-  action: 'BILL_CREATED' | 'BILL_EDITED' | 'BILL_DELETED' | 'BILL_CANCELLED' | 'HEALTH_CHECK_REPAIR' | 'STOCK_ADJUSTED' | 'CLIENT_ADDED' | 'PRODUCT_ADDED' | 'LOGIN' | 'RESTORE_DATA' | 'DATABASE_RESET' | 'OTP_ATTEMPT_SUCCESS' | 'OTP_ATTEMPT_FAILURE';
+  action: SystemAuditAction;
   details: string;
+  deviceInfo?: string;
   userPhone?: string;
+}
+
+export interface HeldBill {
+  id: string;
+  parkedAt: string;
+  clientName: string;
+  clientPhone: string;
+  clientId?: number;
+  items: InvoiceItem[];
+  grandTotal: number;
+  isGstInvoice?: boolean;
+  invoiceTheme?: SecondaryPrintStyle;
+  notes?: string;
+}
+
+export interface ExpenseRecord {
+  id: string;
+  date: string;
+  category: 'Rent' | 'Electricity' | 'Transport' | 'Staff Salary' | 'Packaging' | 'Misc';
+  description: string;
+  amount: number;
+  paymentMode: 'CASH' | 'UPI' | 'BANK';
 }
 
 export interface OtpAuditLogEntry {
@@ -225,3 +290,4 @@ export interface OfflineSyncQueueItem {
   payload: UserUserDataState;
   timestamp: number;
 }
+

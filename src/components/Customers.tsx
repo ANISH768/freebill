@@ -220,15 +220,14 @@ export default function Customers({
   return (
     <div className="space-y-6">
       
-      {/* ----------------- TOP MYBILLBOOK SUMMARY BAR ----------------- */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* ----------------- DESIGN VARIATION 6: CUSTOMERS & KHATA HEADER ----------------- */}
+      <div className="v6-card !mb-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-            <span>Parties & Customers Directory</span>
-            <span className="text-xs text-slate-400 font-sans font-bold hidden sm:inline">&bull; ग्राहक व पार्टियां</span>
+          <h2 className="v6-view-title">
+            Parties &amp; Khata Directory
           </h2>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
-            ग्राहकों के खाते, बकाया राशि, GSTIN और लेजर स्टेटमेंट प्रबंधित करें
+          <p className="text-xs text-[#64748b] font-medium mt-1">
+            Manage customer accounts, credit (udhaar) receivables, GSTINs, and party ledger statements offline
           </p>
         </div>
 
@@ -237,78 +236,79 @@ export default function Customers({
             <button
               type="button"
               onClick={onOpenFileImport}
-              className="bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              className="bg-[#f8fafc] hover:bg-slate-100 border border-[#e2e8f0] text-[#1a1c21] font-bold py-2.5 px-4 rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
               title="Add parties & data from saved project files or local JSON/CSV file"
             >
               <span>📂</span>
-              <span>Add File Data (फ़ाइल डेटा जोड़ें)</span>
+              <span>Import File Data</span>
             </button>
           )}
           {onViewLedger && (
             <button
               onClick={() => onViewLedger()}
-              className="bg-slate-900 hover:bg-black text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              className="bg-[#1e293b] hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
               title="View All Customer Ledgers"
             >
-              <FileText className="w-4 h-4 text-emerald-400" />
+              <FileText className="w-4 h-4 text-[#fbbf24]" />
               <span>All Party Ledgers (खाता बही)</span>
             </button>
           )}
 
           <button
             onClick={() => setShowAddClientModal(true)}
-            className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-black py-2.5 px-5 rounded-xl text-xs shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+            className="bg-[#2563eb] hover:bg-blue-700 text-white font-extrabold py-2.5 px-5 rounded-xl text-xs shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
+            style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
             <UserPlus className="w-4 h-4" />
-            <span>+ Add New Party (नई पार्टी जोड़ें)</span>
+            <span>+ Add New Party</span>
           </button>
         </div>
       </div>
 
-      {/* ----------------- MYBILLBOOK METRIC SUMMARY CARDS ----------------- */}
+      {/* ----------------- DESIGN VARIATION 6: METRIC SUMMARY CARDS ----------------- */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="v6-card !mb-0 !p-5 flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+            <span className="v6-label-caps !mb-1.5">
               Total Parties (कुल ग्राहक)
             </span>
-            <span className="text-2xl font-black text-slate-900 font-mono mt-0.5 block">
+            <span className="text-2xl font-extrabold text-[#1a1c21] font-mono tabular-nums block">
               {clients.length}
             </span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg">
-            👥
+          <div className="w-10 h-10 rounded-xl bg-[#eff6ff] text-[#2563eb] flex items-center justify-center font-bold">
+            <UserCheck className="w-5 h-5" />
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="v6-card !mb-0 !p-5 flex items-center justify-between bg-[#fffbeb]/50 border-amber-200">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-red-500 block">
+            <span className="v6-label-caps !text-[#b45309] !mb-1.5">
               To Collect (कुल बकाया लेना है)
             </span>
-            <span className="text-2xl font-black text-red-600 font-mono mt-0.5 block">
+            <span className="text-2xl font-extrabold text-[#d97706] font-mono tabular-nums block">
               ₹{formatPrice(totalReceivables)}
             </span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold text-lg">
+          <div className="w-10 h-10 rounded-xl bg-[#fffbeb] border border-amber-200 text-[#d97706] flex items-center justify-center font-mono font-bold text-lg">
             ₹
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="v6-card !mb-0 !p-5 flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 block">
+            <span className="v6-label-caps !text-[#059669] !mb-1.5">
               Settled Accounts (पूरा भुगतान)
             </span>
-            <span className="text-2xl font-black text-emerald-700 font-mono mt-0.5 block">
+            <span className="text-2xl font-extrabold text-[#059669] font-mono tabular-nums block">
               {clients.filter(c => {
                 const s = (c.id && clientBalances.get(c.id)) || (c.phone && clientBalances.get(c.phone));
                 return !s || s.balanceDue <= 0;
               }).length}
             </span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg">
-            ✓
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#059669] flex items-center justify-center font-bold">
+            <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
       </div>

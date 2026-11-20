@@ -392,6 +392,668 @@ export default function UnifiedBillDocument({
   const tableHeaderText =
     isEstimateStyle || isClassicGst ? '#0f172a' : '#ffffff';
 
+  const isTallyPrimeGst = config.secondaryStyle === 'tally_prime_gst';
+  const isTallyPrimeNonGst = config.secondaryStyle === 'tally_prime_non_gst';
+  const isTallyErp9Gst = config.secondaryStyle === 'tally_erp9_gst';
+  const isTallySimpleEstimate = config.secondaryStyle === 'tally_simple_estimate';
+  const isAnyTallyTheme =
+    isTallyPrimeGst || isTallyPrimeNonGst || isTallyErp9Gst || isTallySimpleEstimate;
+
+  if (isAnyTallyTheme) {
+    const isGstTally = isTallyPrimeGst || isTallyErp9Gst;
+    const tallyTitle = isTallyPrimeGst
+      ? config.billTitle || 'TAX INVOICE'
+      : isTallyErp9Gst
+      ? config.billTitle || 'TAX INVOICE'
+      : isTallyPrimeNonGst
+      ? config.billTitle || 'BILL OF SUPPLY'
+      : 'ESTIMATE';
+
+    const effectiveTaxPct = Number(estimate.taxPct) > 0 ? Number(estimate.taxPct) : isGstTally ? 5 : 0;
+    const halfTaxPct = (effectiveTaxPct / 2).toFixed(1).replace(/\.0$/, '');
+    const computedTaxAmt =
+      Number(estimate.taxAmt) > 0
+        ? Number(estimate.taxAmt)
+        : isGstTally && Number(estimate.taxPct) > 0
+        ? (Number(estimate.subtotal) * effectiveTaxPct) / 100
+        : 0;
+    const halfTaxAmt = computedTaxAmt / 2;
+    const totalQtySum = (estimate.items || []).reduce((s, i) => s + (Number(i.qty) || 0), 0);
+
+    return (
+      <div className={`print-sheets-wrapper space-y-6 print:space-y-0 w-full flex flex-col items-center ${className}`}>
+        {slices.map((slice) => {
+          const {
+            items: pageItems,
+            startIndex,
+            pageNumber,
+            totalPages,
+            isFirstPage,
+            isLastPage,
+            targetGridRows,
+            rowHeightPx,
+            fontScalePx,
+          } = slice;
+
+          const pageSubtotal = pageItems.reduce((sum, it) => sum + (Number(it.total) || 0), 0);
+          const broughtForwardTotal = (estimate.items || [])
+            .slice(0, startIndex)
+            .reduce((sum, it) => sum + (Number(it.total) || 0), 0);
+          const hasBroughtForwardRow = !isFirstPage && startIndex > 0;
+          const usedRows = pageItems.length + (hasBroughtForwardRow ? 1 : 0);
+          const emptyRowsCount = Math.max(0, targetGridRows - usedRows);
+
+          return (
+            <div key={pageNumber} className="w-full flex flex-col items-center print:block">
+              {isPrintPreview && (
+                <div className="no-print mb-1.5 flex items-center justify-between w-full max-w-[210mm] px-2 text-[11px] font-bold text-slate-600">
+                  <span className="inline-flex items-center gap-1.5 bg-white border border-slate-300 px-2.5 py-0.5 rounded-md shadow-2xs text-slate-800">
+                    <span>📄 Sheet {pageNumber} of {totalPages}</span>
+                    <span className="text-slate-400">•</span>
+                    <span className="text-[#003a61] font-black">
+                      {isTallyPrimeGst
+                        ? 'Tally Prime GST'
+                        : isTallyPrimeNonGst
+                        ? 'Tally Prime Non-GST'
+                        : isTallyErp9Gst
+                        ? 'Tally.ERP 9 GST'
+                        : 'Tally Simple Estimate'}{' '}
+                      ({isA5 ? 'A5' : 'A4'})
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Items {startIndex + 1}–{startIndex + pageItems.length}
+                  </span>
+                </div>
+              )}
+
+              <div
+                className={`unified-bill-sheet print-page bg-white text-black shadow-2xl mx-auto flex flex-col justify-between box-border select-text ${
+                  isA5
+                    ? 'A5 a5-print-page w-[148mm] h-[208mm] max-h-[208mm] p-[5mm]'
+                    : 'A4 a4-print-page w-[210mm] h-[295mm] max-h-[295mm] p-[6mm]'
+                } ${!isLastPage ? 'page-break-after-always' : 'last-print-page'}`}
+                style={{
+                  fontFamily: "'Roboto Mono', monospace",
+                  fontSize: `${fontScalePx}px`,
+                  boxSizing: 'border-box',
+                  overflow: 'hidden',
+                  pageBreakAfter: !isLastPage ? 'always' : 'avoid',
+                  breakAfter: !isLastPage ? 'page' : 'avoid',
+                  pageBreakInside: 'avoid',
+                  breakInside: 'avoid',
+                }}
+              >
+                <div
+                  className="invoice-page-frame w-full h-full flex-1 flex flex-col justify-between border border-black box-border overflow-hidden"
+                  style={{ border: '1px solid #000000', boxSizing: 'border-box' }}
+                >
+                  {/* ================= TALLY TOP HEADER & PARTY GRID ================= */}
+                  <div className="shrink-0">
+                    {/* Top Title Bar */}
+                    <div className="text-center font-bold py-1 px-2 border-b border-black bg-[#f1f5f9] relative uppercase tracking-wider text-[11px]">
+                      <span>{tallyTitle}</span>
+                      {secondaryBillTitle && (
+                        <span className="text-[8px] font-normal ml-2 text-slate-600">
+                          ({secondaryBillTitle})
+                        </span>
+                      )}
+                      {totalPages > 1 && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-bold px-1.5 py-0.5 border border-black bg-white">
+                          Page {pageNumber}/{totalPages}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Variant A: Tally Prime GST & Tally Prime Non-GST (Consignee + Buyer Split Grid) */}
+                    {(isTallyPrimeGst || isTallyPrimeNonGst) && (
+                      <>
+                        <div className="grid grid-cols-2 border-b border-black text-[9px] leading-snug">
+                          <div className="p-2 border-r border-black">
+                            <span className="text-[7.5px] uppercase text-slate-500 block">
+                              Consignee
+                            </span>
+                            <strong className="text-[10.5px] uppercase block text-black">
+                              {estimate.clientName || 'Cash Customer'}
+                            </strong>
+                            {estimate.clientAddr && (
+                              <div className="text-[8.5px] text-black">{estimate.clientAddr}</div>
+                            )}
+                            {isTallyPrimeGst && (
+                              <div className="mt-0.5 text-[8px] text-black">
+                                <div>GSTIN/UIN: {estimate.clientGstin || config.gstin || 'Unregistered'}</div>
+                                <div>State Name: {config.state || '07 - Delhi'}</div>
+                              </div>
+                            )}
+                            {!isTallyPrimeGst && estimate.clientPhone && (
+                              <div className="mt-0.5 text-[8.5px]">
+                                Contact: +91 {estimate.clientPhone}
+                              </div>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2">
+                            <div className="p-2 border-r border-b border-black">
+                              <span className="text-[7.5px] uppercase text-slate-500 block">
+                                Invoice No.
+                              </span>
+                              <strong className="text-[10px] text-black">{estimate.serial}</strong>
+                            </div>
+                            <div className="p-2 border-b border-black">
+                              <span className="text-[7.5px] uppercase text-slate-500 block">
+                                Dated
+                              </span>
+                              <strong className="text-[9.5px] text-black">{estimate.date}</strong>
+                            </div>
+                            <div className="p-2 border-r border-black">
+                              <span className="text-[7.5px] uppercase text-slate-500 block">
+                                Delivery Note
+                              </span>
+                              <strong className="text-[8.5px] text-black truncate block">
+                                {estimate.deliveryNote || 'Direct Store Handover'}
+                              </strong>
+                            </div>
+                            <div className="p-2">
+                              <span className="text-[7.5px] uppercase text-slate-500 block">
+                                Mode/Terms of Payment
+                              </span>
+                              <strong className="text-[8.5px] uppercase text-black block">
+                                {paymentModeText} ({estimate.status})
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 border-b border-black text-[8.5px] leading-snug">
+                          <div className="p-1.5 px-2 border-r border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Buyer (if other than consignee)
+                            </span>
+                            <strong className="text-black uppercase">
+                              {estimate.clientName || 'Cash Customer'}
+                            </strong>
+                            {estimate.clientPhone && (
+                              <span className="ml-2 text-black">
+                                | Contact: +91 {estimate.clientPhone}
+                              </span>
+                            )}
+                          </div>
+                          <div className="p-1.5 px-2 flex items-center justify-between">
+                            <div>
+                              <span className="text-[7px] uppercase text-slate-500 block">
+                                Seller / Counter
+                              </span>
+                              <strong className="text-black uppercase">{businessName}</strong>
+                            </div>
+                            {isTallyPrimeGst && config.gstin && (
+                              <div className="text-right">
+                                <span className="text-[7px] uppercase text-slate-500 block">
+                                  Company GSTIN
+                                </span>
+                                <strong className="text-black">{config.gstin}</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Variant B: Tally.ERP 9 Classic GST (Seller Top Block + Buyer Bottom Block) */}
+                    {isTallyErp9Gst && (
+                      <div className="grid grid-cols-12 border-b border-black text-[8.5px] leading-snug">
+                        <div className="col-span-7 border-r border-black flex flex-col justify-between">
+                          <div className="p-1.5 px-2 border-b border-black bg-slate-50/50">
+                            <strong className="text-[10.5px] uppercase block text-black">
+                              {businessName}
+                            </strong>
+                            {config.address && <div className="text-[8px]">{config.address}</div>}
+                            <div className="flex flex-wrap gap-x-3 text-[8px] mt-0.5">
+                              <span>
+                                <b>GSTIN/UIN:</b> {config.gstin || '07AAAAA0000A1Z5'}
+                              </span>
+                              <span>
+                                <b>State:</b> {config.state || '07 - Delhi'}
+                              </span>
+                              {config.phone && (
+                                <span>
+                                  <b>Ph:</b> +91 {config.phone}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="p-1.5 px-2">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Buyer (Bill To)
+                            </span>
+                            <strong className="text-[10px] uppercase block text-black">
+                              {estimate.clientName || 'Cash Customer'}
+                            </strong>
+                            {estimate.clientAddr && (
+                              <div className="text-[8px]">{estimate.clientAddr}</div>
+                            )}
+                            <div className="flex flex-wrap gap-x-3 text-[8px] mt-0.5">
+                              {estimate.clientPhone && (
+                                <span>
+                                  <b>Contact:</b> +91 {estimate.clientPhone}
+                                </span>
+                              )}
+                              {estimate.clientGstin && (
+                                <span>
+                                  <b>Party GSTIN:</b> {estimate.clientGstin}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="col-span-5 grid grid-cols-2 text-[8px]">
+                          <div className="p-1.5 border-r border-b border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Invoice No.
+                            </span>
+                            <strong className="text-[9.5px]">{estimate.serial}</strong>
+                          </div>
+                          <div className="p-1.5 border-b border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">Dated</span>
+                            <strong className="text-[9.5px]">{estimate.date}</strong>
+                          </div>
+                          <div className="p-1.5 border-r border-b border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Delivery Note
+                            </span>
+                            <strong className="truncate block">
+                              {estimate.deliveryNote || 'Direct Handover'}
+                            </strong>
+                          </div>
+                          <div className="p-1.5 border-b border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Mode/Terms of Payment
+                            </span>
+                            <strong className="uppercase">{paymentModeText}</strong>
+                          </div>
+                          <div className="p-1.5 border-r border-black">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Supplier&apos;s Ref.
+                            </span>
+                            <strong>{estimate.status}</strong>
+                          </div>
+                          <div className="p-1.5">
+                            <span className="text-[7px] uppercase text-slate-500 block">
+                              Destination
+                            </span>
+                            <strong className="truncate block">
+                              {estimate.clientAddr ? 'Party Address' : 'Counter Sale'}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Variant C: Tally Simple Estimate / Kacha Bill */}
+                    {isTallySimpleEstimate && (
+                      <div className="grid grid-cols-12 border-b border-black text-[9px] leading-snug">
+                        <div className="col-span-7 p-2 border-r border-black">
+                          <span className="text-[7.5px] uppercase text-slate-500 block">
+                            Party Name &amp; Address
+                          </span>
+                          <strong className="text-[10.5px] uppercase block text-black">
+                            {estimate.clientName || 'Cash Customer'}
+                          </strong>
+                          {estimate.clientAddr && (
+                            <div className="text-[8.5px] text-black">{estimate.clientAddr}</div>
+                          )}
+                          {estimate.clientPhone && (
+                            <div className="text-[8.5px] mt-0.5">
+                              Mob: +91 {estimate.clientPhone}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-span-5 grid grid-cols-2">
+                          <div className="p-2 border-r border-b border-black">
+                            <span className="text-[7.5px] uppercase text-slate-500 block">
+                              Estimate No.
+                            </span>
+                            <strong className="text-[10px]">{estimate.serial}</strong>
+                          </div>
+                          <div className="p-2 border-b border-black">
+                            <span className="text-[7.5px] uppercase text-slate-500 block">
+                              Date
+                            </span>
+                            <strong className="text-[9.5px]">{estimate.date}</strong>
+                          </div>
+                          <div className="p-2 col-span-2 flex items-center justify-between">
+                            <div>
+                              <span className="text-[7px] uppercase text-slate-500 block">
+                                Payment Terms
+                              </span>
+                              <strong className="uppercase">
+                                {paymentModeText} ({estimate.status})
+                              </strong>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[7px] uppercase text-slate-500 block">
+                                Counter
+                              </span>
+                              <strong>{businessName}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ================= TALLY MIDDLE ITEMS TABLE ================= */}
+                  <div className="flex-1 flex flex-col justify-between overflow-hidden">
+                    <table
+                      className="w-full border-collapse flex-1"
+                      style={{
+                        fontSize: `${fontScalePx}px`,
+                        borderCollapse: 'collapse',
+                        pageBreakInside: 'avoid',
+                      }}
+                    >
+                      <thead>
+                        <tr className="border-b border-black bg-[#f1f5f9] text-black uppercase text-[8px] font-bold">
+                          <th className="border-r border-black py-1 px-1 w-8 text-center">Sl No.</th>
+                          <th className="border-r border-black py-1 px-2 text-left">
+                            {isTallySimpleEstimate ? 'Particulars' : 'Description of Goods'}
+                          </th>
+                          {isGstTally && (
+                            <th className="border-r border-black py-1 px-1 w-14 text-center">
+                              HSN/SAC
+                            </th>
+                          )}
+                          {isTallyErp9Gst && (
+                            <th className="border-r border-black py-1 px-1 w-10 text-center">
+                              GST%
+                            </th>
+                          )}
+                          <th className="border-r border-black py-1 px-1 w-14 text-center">
+                            Quantity
+                          </th>
+                          {!isGstTally && config.showMrp && (
+                            <th className="border-r border-black py-1 px-1 w-14 text-right">MRP</th>
+                          )}
+                          <th className="border-r border-black py-1 px-1 w-14 text-right">Rate</th>
+                          <th className="border-r border-black py-1 px-1 w-10 text-center">per</th>
+                          {config.showDiscount && (
+                            <th className="border-r border-black py-1 px-1 w-12 text-center">
+                              Disc %
+                            </th>
+                          )}
+                          <th className="py-1 px-1.5 w-20 text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-black">
+                        {hasBroughtForwardRow && (
+                          <tr
+                            className="border-b border-slate-300 bg-slate-50 font-bold italic"
+                            style={{ height: `${rowHeightPx}px`, lineHeight: 1.1 }}
+                          >
+                            <td className="border-r border-black px-1 text-center">-</td>
+                            <td className="border-r border-black px-2">
+                              Brought Forward from Page {pageNumber - 1} ({startIndex} items)
+                            </td>
+                            {isGstTally && (
+                              <td className="border-r border-black px-1 text-center">-</td>
+                            )}
+                            {isTallyErp9Gst && (
+                              <td className="border-r border-black px-1 text-center">-</td>
+                            )}
+                            <td className="border-r border-black px-1 text-center">-</td>
+                            {!isGstTally && config.showMrp && (
+                              <td className="border-r border-black px-1 text-right">-</td>
+                            )}
+                            <td className="border-r border-black px-1 text-right">-</td>
+                            <td className="border-r border-black px-1 text-center">-</td>
+                            {config.showDiscount && (
+                              <td className="border-r border-black px-1 text-center">-</td>
+                            )}
+                            <td className="px-1.5 text-right font-bold">
+                              {formatPrice(broughtForwardTotal)}
+                            </td>
+                          </tr>
+                        )}
+
+                        {pageItems.map((itm, itemIdx) => {
+                          const serialNum = startIndex + itemIdx + 1;
+                          const effectiveDisc =
+                            itm.disc > 0
+                              ? Number(itm.disc).toFixed(1)
+                              : itm.mrp > itm.price && itm.mrp > 0
+                              ? (((itm.mrp - itm.price) / itm.mrp) * 100).toFixed(1)
+                              : '0';
+                          const unitLabel = itm.unit || 'Pcs';
+
+                          return (
+                            <tr
+                              key={itemIdx}
+                              className="border-b border-slate-200"
+                              style={{ height: `${rowHeightPx}px`, lineHeight: 1.1 }}
+                            >
+                              <td className="border-r border-black px-1 text-center">
+                                {serialNum}
+                              </td>
+                              <td className="border-r border-black px-2 font-bold truncate max-w-[185px]">
+                                {itm.name}
+                              </td>
+                              {isGstTally && (
+                                <td className="border-r border-black px-1 text-center text-[8px]">
+                                  {itm.hsn || (itm.sku ? itm.sku.slice(0, 8) : '-')}
+                                </td>
+                              )}
+                              {isTallyErp9Gst && (
+                                <td className="border-r border-black px-1 text-center text-[8px]">
+                                  {itm.gstRate ? `${itm.gstRate}%` : `${effectiveTaxPct}%`}
+                                </td>
+                              )}
+                              <td className="border-r border-black px-1 text-center font-bold">
+                                {itm.qty} {unitLabel}
+                              </td>
+                              {!isGstTally && config.showMrp && (
+                                <td className="border-r border-black px-1 text-right">
+                                  {itm.mrp ? formatPrice(itm.mrp) : '-'}
+                                </td>
+                              )}
+                              <td className="border-r border-black px-1 text-right">
+                                {formatPrice(itm.price)}
+                              </td>
+                              <td className="border-r border-black px-1 text-center text-[8px]">
+                                {unitLabel}
+                              </td>
+                              {config.showDiscount && (
+                                <td className="border-r border-black px-1 text-center">
+                                  {Number(effectiveDisc) > 0 ? `${effectiveDisc}%` : '-'}
+                                </td>
+                              )}
+                              <td className="px-1.5 text-right font-bold">
+                                {formatPrice(itm.total)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        {Array.from({ length: emptyRowsCount }).map((_, emptyIdx) => (
+                          <tr
+                            key={`tally-empty-${emptyIdx}`}
+                            style={{ height: `${rowHeightPx}px`, lineHeight: 1 }}
+                          >
+                            <td className="border-r border-black px-1">&nbsp;</td>
+                            <td className="border-r border-black px-2">&nbsp;</td>
+                            {isGstTally && <td className="border-r border-black px-1">&nbsp;</td>}
+                            {isTallyErp9Gst && (
+                              <td className="border-r border-black px-1">&nbsp;</td>
+                            )}
+                            <td className="border-r border-black px-1">&nbsp;</td>
+                            {!isGstTally && config.showMrp && (
+                              <td className="border-r border-black px-1">&nbsp;</td>
+                            )}
+                            <td className="border-r border-black px-1">&nbsp;</td>
+                            <td className="border-r border-black px-1">&nbsp;</td>
+                            {config.showDiscount && (
+                              <td className="border-r border-black px-1">&nbsp;</td>
+                            )}
+                            <td className="px-1.5">&nbsp;</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {isLastPage && (
+                        <tfoot>
+                          <tr className="border-t border-black bg-[#f1f5f9] font-bold text-[9px]">
+                            <td
+                              colSpan={isTallyErp9Gst ? 4 : isGstTally ? 3 : 2}
+                              className="border-r border-black py-1 px-2 text-right"
+                            >
+                              Total
+                            </td>
+                            <td className="border-r border-black py-1 px-1 text-center">
+                              {totalQtySum} Nos
+                            </td>
+                            <td
+                              colSpan={
+                                (!isGstTally && config.showMrp ? 1 : 0) +
+                                2 +
+                                (config.showDiscount ? 1 : 0)
+                              }
+                              className="border-r border-black py-1 px-1"
+                            />
+                            <td className="py-1 px-1.5 text-right">
+                              ₹ {formatPrice(estimate.subtotal)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  {/* ================= TALLY BOTTOM SUMMARY, DECLARATION & SIGNATURES ================= */}
+                  <div className="border-t border-black shrink-0">
+                    {!isLastPage ? (
+                      <div className="bg-[#f1f5f9] px-3 py-1.5 flex items-center justify-between text-[9px] font-bold">
+                        <span>
+                          Page {pageNumber} Sub-Total ({pageItems.length} items) → Continued on Page{' '}
+                          {pageNumber + 1}...
+                        </span>
+                        <span>Carried Forward: ₹ {formatPrice(broughtForwardTotal + pageSubtotal)}</span>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Summary Box: Left (Amount in Words + Bank/QR) | Right (Tax/Discount/Grand Total) */}
+                        <div className="grid grid-cols-12 text-[8.5px]">
+                          <div className="col-span-7 p-2 border-r border-black flex flex-col justify-between">
+                            <div>
+                              <span className="text-[7.5px] uppercase text-slate-500 block">
+                                Amount Chargeable (in words)
+                              </span>
+                              <strong className="italic text-[9px] text-black block mt-0.5">
+                                INR {numberToWords(Math.round(estimate.grandTotal))} Only
+                              </strong>
+                            </div>
+
+                            {(config.showBankDetails || (config.showQrCode && qrCodeDataUrl)) && (
+                              <div className="mt-1 pt-1 border-t border-dotted border-slate-400 flex items-center justify-between gap-2 text-[7.5px]">
+                                {config.showBankDetails && (
+                                  <div>
+                                    <div>
+                                      <b>Bank:</b> {config.bankName || 'State Bank of India'}
+                                    </div>
+                                    <div>
+                                      <b>A/c No:</b> {config.accountNo || '349012384910'} |{' '}
+                                      <b>IFSC:</b> {config.ifscCode || 'SBIN0001234'}
+                                    </div>
+                                  </div>
+                                )}
+                                {config.showQrCode && qrCodeDataUrl && (
+                                  <img
+                                    src={qrCodeDataUrl}
+                                    alt="UPI QR"
+                                    className="w-10 h-10 object-contain border border-black p-0.5 bg-white"
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="col-span-5 flex flex-col justify-between">
+                            <div>
+                              {isGstTally && (
+                                <>
+                                  <div className="flex justify-between px-2 py-0.5 border-b border-slate-200">
+                                    <span>Output CGST @ {halfTaxPct}%</span>
+                                    <span>{formatPrice(halfTaxAmt)}</span>
+                                  </div>
+                                  <div className="flex justify-between px-2 py-0.5 border-b border-slate-200">
+                                    <span>Output SGST @ {halfTaxPct}%</span>
+                                    <span>{formatPrice(halfTaxAmt)}</span>
+                                  </div>
+                                </>
+                              )}
+                              {totalDiscount > 0 && (
+                                <div className="flex justify-between px-2 py-0.5 border-b border-slate-200 text-rose-700 font-bold">
+                                  <span>Less: Discount</span>
+                                  <span>-{formatPrice(totalDiscount)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between px-2 py-0.5 border-b border-slate-200 text-slate-700">
+                                <span>Paid / Received</span>
+                                <span>₹ {formatPrice(estimate.paidAmount)}</span>
+                              </div>
+                              {estimate.balanceDue > 0 && (
+                                <div className="flex justify-between px-2 py-0.5 border-b border-slate-200 font-bold text-rose-700">
+                                  <span>Balance Due</span>
+                                  <span>₹ {formatPrice(estimate.balanceDue)}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="bg-[#f1f5f9] font-bold border-t border-black px-2 py-1.5 flex justify-between text-[10px]">
+                              <span>Total</span>
+                              <span>₹ {formatPrice(estimate.grandTotal)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Declaration Bar */}
+                        <div className="border-t border-black px-2 py-1 text-[7.5px] leading-tight">
+                          <span className="uppercase text-slate-500 block text-[7px]">
+                            Declaration:
+                          </span>
+                          We declare that this invoice shows the actual price of the goods described
+                          and that all particulars are true and correct.
+                        </div>
+
+                        {/* Dual Signature Boxes */}
+                        <div className="grid grid-cols-2 border-t border-black h-14 text-[8px]">
+                          <div className="p-2 border-r border-black flex flex-col justify-between">
+                            <span className="text-[7px] uppercase text-slate-500">
+                              Customer&apos;s Seal and Signature
+                            </span>
+                            {isTallyErp9Gst && (
+                              <span className="text-[7px] text-slate-500 italic">
+                                E. &amp; O.E. • Subject to Local Jurisdiction
+                              </span>
+                            )}
+                          </div>
+                          <div className="p-2 flex flex-col justify-between text-right">
+                            <span className="text-[7.5px] uppercase text-slate-600 font-bold">
+                              for {businessName}
+                            </span>
+                            <strong className="text-[8.5px]">
+                              {config.authorizedSignatoryLabel || 'Authorised Signatory'}
+                            </strong>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className={`print-sheets-wrapper space-y-6 print:space-y-0 w-full flex flex-col items-center ${className}`}>
       {slices.map((slice) => {

@@ -1339,6 +1339,9 @@ export default function Settings({
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
+                    try {
+                      localStorage.setItem('pos_last_backup_timestamp', String(Date.now()));
+                    } catch {}
                     onShowToast('Saved_Bills_Data.json downloaded to your Downloads folder!');
                   } catch {
                     onShowToast('Failed to download Saved_Bills_Data.json');
@@ -1351,8 +1354,53 @@ export default function Settings({
               </button>
             </div>
           </div>
+
+          {/* Invoice Prefix & Clerk Account Settings */}
+          <div className="bg-slate-50 dark:bg-slate-800/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 max-w-xl">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Financial Year Invoice Prefix
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Set a custom prefix such as <code className="font-mono font-bold">BSP/2026-27/</code> or leave blank to use <code className="font-mono font-bold">EST-001</code>.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                defaultValue={localStorage.getItem('pos_invoice_prefix') || ''}
+                placeholder="e.g. BSP/2026-27/ (or leave empty for EST-001)"
+                onBlur={(e) => {
+                  try {
+                    localStorage.setItem('pos_invoice_prefix', e.target.value.trim());
+                    onShowToast(
+                      e.target.value.trim()
+                        ? `Invoice prefix updated to ${e.target.value.trim()}`
+                        : 'Invoice numbering reset to EST-001 series'
+                    );
+                  } catch {}
+                }}
+                className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold"
+              />
+            </div>
+          </div>
         </div>
       )}
+
+      {/* ----------------- SETTINGS > ABOUT: OFFLINE STORAGE EXPLANATION ----------------- */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 border border-slate-800 shadow-sm space-y-3">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+          <h3 className="text-sm font-black uppercase tracking-wider">
+            About BillSync Pro — 100% Local Offline Storage Architecture
+          </h3>
+        </div>
+        <p className="text-xs text-slate-300 leading-relaxed">
+          BillSync Pro is engineered as a true <strong>Offline-First Progressive Web App (PWA)</strong>. All your invoices, customer ledgers, product inventory, GST calculations, and audit logs are stored directly inside your browser&apos;s local <strong>IndexedDB</strong> and <strong>localStorage</strong> vault on this device — zero internet is required to create or print bills.
+        </p>
+        <p className="text-xs text-amber-300 font-semibold leading-relaxed">
+          Why Backups Matter: Because your business data lives privately on your phone or computer (and not on an external third-party cloud), clearing your browser site data or losing your device would erase local records unless you keep a backup file. Use the 1-tap JSON Backup download at least once a week to keep an offline copy in your Downloads folder, Google Drive, or WhatsApp.
+        </p>
+      </div>
     </div>
   );
 }
+

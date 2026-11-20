@@ -44,6 +44,25 @@ const COLOR_PRESETS = [
   { name: 'Sunset Orange', hex: '#ea580c' },
 ];
 
+const PRINT_THEME_CATALOG: {
+  id: SecondaryPrintStyle;
+  name: string;
+  desc: string;
+  mode: 'gst' | 'non_gst';
+  defaultTitle: string;
+}[] = [
+  { id: 'tally_prime_gst', name: 'Tally Prime GST', desc: 'Tally Prime boxed GST grid with Consignee, Buyer, HSN & CGST/SGST', mode: 'gst', defaultTitle: 'TAX INVOICE' },
+  { id: 'tally_prime_non_gst', name: 'Tally Prime Non-GST', desc: 'Tally Prime Non-GST Bill of Supply without HSN or Tax rows', mode: 'non_gst', defaultTitle: 'BILL OF SUPPLY' },
+  { id: 'tally_erp9_gst', name: 'Tally ERP 9 GST', desc: 'Classic Tally.ERP 9 GST Tax Invoice with Seller Header & GST%', mode: 'gst', defaultTitle: 'TAX INVOICE' },
+  { id: 'tally_simple_estimate', name: 'Tally Simple Estimate', desc: 'Tally Simple Estimate / Kacha Bill with MRP, Rate & Disc%', mode: 'non_gst', defaultTitle: 'ESTIMATE' },
+  { id: 'estimate', name: 'Estimate', desc: 'Classic bordered A5/A4 paginated Estimate sheet (20 rows/page)', mode: 'non_gst', defaultTitle: 'ESTIMATE' },
+  { id: 'modern', name: 'Modern BillBook', desc: 'Colored header & modern rounded cards', mode: 'gst', defaultTitle: 'TAX INVOICE' },
+  { id: 'classic_gst', name: 'Classic GST Tax Invoice', desc: 'Formal GST grid, HSN table, & borders', mode: 'gst', defaultTitle: 'TAX INVOICE' },
+  { id: 'minimal', name: 'Minimalist Clean', desc: 'Clean monochrome & hairline dividers', mode: 'non_gst', defaultTitle: 'BILL OF SUPPLY' },
+  { id: 'wholesale', name: 'Compact Retail', desc: 'Space-saving maximum items per sheet', mode: 'non_gst', defaultTitle: 'RETAIL INVOICE' },
+  { id: 'stylish', name: 'Stylish Premium', desc: 'Vibrant banner, rounded badges & QR highlight', mode: 'gst', defaultTitle: 'TAX INVOICE' },
+];
+
 export default function PrintInvoice({
   estimate,
   businessName,
@@ -75,6 +94,24 @@ export default function PrintInvoice({
   const [drawerTab, setDrawerTab] = useState<'layout' | 'header' | 'columns' | 'bank' | 'terms'>('layout');
   const [saveToast, setSaveToast] = useState<boolean>(false);
 
+  // GST vs Non-GST active mode and remembered templates
+  const [invoiceTypeMode, setInvoiceTypeMode] = useState<'gst' | 'non_gst'>(() => {
+    const activeStyle = estimate?.invoiceTheme || config.secondaryStyle || 'modern';
+    const matched = PRINT_THEME_CATALOG.find(t => t.id === activeStyle);
+    if (matched) return matched.mode;
+    return estimate?.isGstInvoice || (estimate?.taxPct || 0) > 0 ? 'gst' : 'non_gst';
+  });
+  const [lastGstStyle, setLastGstStyle] = useState<SecondaryPrintStyle>(() => {
+    const activeStyle = estimate?.invoiceTheme || config.secondaryStyle || 'tally_prime_gst';
+    const matched = PRINT_THEME_CATALOG.find(t => t.id === activeStyle && t.mode === 'gst');
+    return matched ? matched.id : 'tally_prime_gst';
+  });
+  const [lastNonGstStyle, setLastNonGstStyle] = useState<SecondaryPrintStyle>(() => {
+    const activeStyle = estimate?.invoiceTheme || config.secondaryStyle || 'tally_prime_non_gst';
+    const matched = PRINT_THEME_CATALOG.find(t => t.id === activeStyle && t.mode === 'non_gst');
+    return matched ? matched.id : 'tally_prime_non_gst';
+  });
+
   // Cross-component live synchronization
   useEffect(() => {
     const handleConfigSync = () => {
@@ -84,6 +121,10 @@ export default function PrintInvoice({
         showQrCode: prev.showQrCode,
       }));
       setPrintLayout(updated.layout);
+      const matched = PRINT_THEME_CATALOG.find(t => t.id === updated.secondaryStyle);
+      if (matched) {
+        setInvoiceTypeMode(matched.mode);
+      }
     };
     window.addEventListener('pos_print_config_updated', handleConfigSync);
     return () => window.removeEventListener('pos_print_config_updated', handleConfigSync);
@@ -100,10 +141,43 @@ export default function PrintInvoice({
   // Handle configuration updates and auto-save
   const handleUpdateConfig = (newConfig: PrintTemplateConfig) => {
     setConfig(newConfig);
+    const matched = PRINT_THEME_CATALOG.find(t => t.id === newConfig.secondaryStyle);
+    if (matched) {
+      setInvoiceTypeMode(matched.mode);
+      if (matched.mode === 'gst') {
+        setLastGstStyle(matched.id);
+      } else {
+        setLastNonGstStyle(matched.id);
+      }
+    }
     savePrintConfig(newConfig, currentUser || undefined);
     window.dispatchEvent(new CustomEvent('pos_print_config_updated', { detail: newConfig }));
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2000);
+  };
+
+  // Instant GST vs Non-GST toggle handler for Print Preview
+  const handleSwitchInvoiceType = (mode: 'gst' | 'non_gst') => {
+    setInvoiceTypeMode(mode);
+    const currentThemeObj = PRINT_THEME_CATALOG.find(t => t.id === config.secondaryStyle);
+    let targetStyle = config.secondaryStyle || 'tally_prime_gst';
+
+    if (mode === 'gst') {
+      if (!currentThemeObj || currentThemeObj.mode !== 'gst') {
+        targetStyle = lastGstStyle || 'tally_prime_gst';
+      }
+    } else {
+      if (!currentThemeObj || currentThemeObj.mode !== 'non_gst') {
+        targetStyle = lastNonGstStyle || 'tally_prime_non_gst';
+      }
+    }
+
+    const targetThemeMeta = PRINT_THEME_CATALOG.find(t => t.id === targetStyle);
+    handleUpdateConfig({
+      ...config,
+      secondaryStyle: targetStyle,
+      billTitle: targetThemeMeta?.defaultTitle || (mode === 'gst' ? 'TAX INVOICE' : 'BILL OF SUPPLY'),
+    });
   };
 
   const handleLayoutChange = (newLayout: 'A4' | 'A5' | 'THERMAL_80' | 'THERMAL_58') => {
@@ -561,27 +635,75 @@ export default function PrintInvoice({
               </button>
             </div>
 
-            {/* Quick Print Style Selector */}
+            {/* GST vs Non-GST Radio / Tab Selection Buttons in Print Preview Toolbar */}
+            <div
+              role="radiogroup"
+              aria-label="Print Preview Invoice Type"
+              className="flex items-center bg-[#e4ebf2] p-1 rounded-xl border border-[#003a61]/25 text-[11px] font-extrabold"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={invoiceTypeMode === 'gst'}
+                onClick={() => handleSwitchInvoiceType('gst')}
+                className={`px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                  invoiceTypeMode === 'gst'
+                    ? 'bg-[#002d4d] text-[#ffb821] shadow-xs font-black'
+                    : 'text-slate-700 hover:text-[#002d4d]'
+                }`}
+                title="Switch to GST Invoice Template & filter GST themes"
+              >
+                <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                  invoiceTypeMode === 'gst' ? 'border-[#ffb821]' : 'border-slate-500'
+                }`}>
+                  {invoiceTypeMode === 'gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+                </span>
+                <span>GST</span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={invoiceTypeMode === 'non_gst'}
+                onClick={() => handleSwitchInvoiceType('non_gst')}
+                className={`px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                  invoiceTypeMode === 'non_gst'
+                    ? 'bg-[#002d4d] text-[#ffb821] shadow-xs font-black'
+                    : 'text-slate-700 hover:text-[#002d4d]'
+                }`}
+                title="Switch to Non-GST Bill of Supply / Estimate Template & filter Non-GST themes"
+              >
+                <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                  invoiceTypeMode === 'non_gst' ? 'border-[#ffb821]' : 'border-slate-500'
+                }`}>
+                  {invoiceTypeMode === 'non_gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+                </span>
+                <span>Non-GST</span>
+              </button>
+            </div>
+
+            {/* Quick Print Style Selector (Filtered by GST / Non-GST) */}
             <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-xl border border-slate-200 text-[11px] font-bold">
               <Palette className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <span className="text-slate-500 hidden sm:inline">Style:</span>
               <select
                 value={config.secondaryStyle || 'modern'}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextStyle = e.target.value as SecondaryPrintStyle;
+                  const meta = PRINT_THEME_CATALOG.find(t => t.id === nextStyle);
                   handleUpdateConfig({
                     ...config,
-                    secondaryStyle: e.target.value as SecondaryPrintStyle,
-                  })
-                }
+                    secondaryStyle: nextStyle,
+                    billTitle: meta?.defaultTitle || config.billTitle,
+                  });
+                }}
                 className="bg-white border border-slate-200 text-slate-800 font-black rounded-lg px-2 py-1 text-[11px] outline-none cursor-pointer"
                 title="Select Printing Style"
               >
-                <option value="estimate">Estimate (Classic Bordered)</option>
-                <option value="modern">Modern BillBook</option>
-                <option value="classic_gst">Classic GST Tax Invoice</option>
-                <option value="minimal">Minimalist Clean</option>
-                <option value="wholesale">Compact Retail</option>
-                <option value="stylish">Stylish Premium</option>
+                {PRINT_THEME_CATALOG.filter(t => t.mode === invoiceTypeMode).map(themeOpt => (
+                  <option key={themeOpt.id} value={themeOpt.id}>
+                    {themeOpt.name}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -727,32 +849,77 @@ export default function PrintInvoice({
             {/* TAB 1: Theme & Format */}
             {drawerTab === 'layout' && (
               <div className="space-y-3">
-                {/* Theme Style Cards */}
+                {/* GST vs Non-GST Radio/Tab Bar inside Customize Setup Drawer */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#e4ebf2] p-2.5 rounded-xl border border-[#003a61]/20">
+                  <div>
+                    <span className="text-[11px] font-extrabold text-[#002d4d] uppercase tracking-tight block">
+                      Invoice Type Selection (GST vs Non-GST)
+                    </span>
+                    <span className="text-[10px] text-slate-600">
+                      Automatically switches active template &amp; filters themes below
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchInvoiceType('gst')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all ${
+                        invoiceTypeMode === 'gst'
+                          ? 'bg-[#002d4d] text-[#ffb821] shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
+                      }`}
+                    >
+                      <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                        invoiceTypeMode === 'gst' ? 'border-[#ffb821]' : 'border-slate-500'
+                      }`}>
+                        {invoiceTypeMode === 'gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+                      </span>
+                      <span>GST Invoice (5)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchInvoiceType('non_gst')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all ${
+                        invoiceTypeMode === 'non_gst'
+                          ? 'bg-[#002d4d] text-[#ffb821] shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
+                      }`}
+                    >
+                      <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                        invoiceTypeMode === 'non_gst' ? 'border-[#ffb821]' : 'border-slate-500'
+                      }`}>
+                        {invoiceTypeMode === 'non_gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+                      </span>
+                      <span>Non-GST (5)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Theme Style Cards (Filtered by active GST / Non-GST mode) */}
                 <div>
                   <label className="block text-[10px] font-black uppercase text-slate-500 mb-1.5">
-                    Invoice Theme Style
+                    {invoiceTypeMode === 'gst' ? 'GST Invoice Templates' : 'Non-GST Bill of Supply / Estimate Templates'}
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[
-                      { id: 'estimate', name: 'Estimate', desc: 'Classic bordered A5/A4 paginated Estimate sheet (20 rows/page)' },
-                      { id: 'modern', name: 'Modern BillBook', desc: 'Colored header & modern rounded cards' },
-                      { id: 'classic_gst', name: 'Classic GST Tax Invoice', desc: 'Formal GST grid, HSN table, & borders' },
-                      { id: 'minimal', name: 'Minimalist Clean', desc: 'Clean monochrome & hairline dividers' },
-                      { id: 'wholesale', name: 'Compact Retail', desc: 'Space-saving maximum items per sheet' },
-                      { id: 'stylish', name: 'Stylish Premium', desc: 'Vibrant banner, rounded badges & QR highlight' },
-                    ].map(style => (
+                    {PRINT_THEME_CATALOG.filter(style => style.mode === invoiceTypeMode).map(style => (
                       <div
                         key={style.id}
-                        onClick={() => handleUpdateConfig({ ...config, secondaryStyle: style.id as SecondaryPrintStyle })}
+                        onClick={() =>
+                          handleUpdateConfig({
+                            ...config,
+                            secondaryStyle: style.id,
+                            billTitle: style.defaultTitle,
+                          })
+                        }
                         className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                           config.secondaryStyle === style.id
-                            ? 'border-indigo-600 bg-indigo-50/70 shadow-xs'
+                            ? 'border-[#002d4d] bg-blue-50/70 shadow-xs ring-1 ring-[#ffb821]'
                             : 'border-slate-200 bg-white hover:bg-slate-50'
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-800 text-xs">{style.name}</span>
-                          {config.secondaryStyle === style.id && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                          {config.secondaryStyle === style.id && <Check className="w-3.5 h-3.5 text-[#002d4d]" />}
                         </div>
                         <span className="text-[10px] text-slate-500 block mt-0.5">{style.desc}</span>
                       </div>

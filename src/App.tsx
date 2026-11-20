@@ -26,7 +26,12 @@ import {
 } from './utils/appSettings';
 import { getSavedPrintConfig } from './utils/printConfig';
 import { t, getSavedLanguage, SupportedLanguage } from './utils/i18n';
-import { Shield, LayoutDashboard, FileSpreadsheet, Layers, Users, Landmark, Database, UserCheck, LogOut, CheckCircle, ChevronLeft, ChevronRight, Lock, Unlock, Printer, Settings as SettingsIcon, Moon, Sun, Globe2, Keyboard, FolderOpen } from 'lucide-react';
+import { Shield, LayoutDashboard, FileSpreadsheet, Layers, Users, Landmark, Database, UserCheck, LogOut, CheckCircle, ChevronLeft, ChevronRight, Lock, Unlock, Printer, Settings as SettingsIcon, Moon, Sun, Globe2, Keyboard, FolderOpen, BarChart3, ShieldCheck, Search } from 'lucide-react';
+import { PWAInstallBar } from './components/PWAInstallBar';
+import { CommandPalette } from './components/CommandPalette';
+import { ReportsAndGst } from './components/ReportsAndGst';
+import { AuditLogsView } from './components/AuditLogsView';
+import { recordSystemAudit } from './utils/systemAuditLogger';
 import { safeStorage, saveUserIsolatedData, getUserIsolatedData, addToOfflineSyncQueue, getOfflineSyncQueue, removeFromOfflineSyncQueue, clearOfflineSyncQueue } from './utils/storage';
 import { requestPersistentStorage } from './utils/crypto';
 import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigured, subscribeToUserFirestoreSync, findUserByPermanentIpFromFirestore } from './db/firebase';
@@ -471,9 +476,22 @@ export default function App() {
   };
 
   // Navigation tab route & history stack for step-by-step back navigation
-  type TabType = 'dashboard' | 'create_estimate' | 'products' | 'clients' | 'statements' | 'backup' | 'print_customizer' | 'scan_camera' | 'settings';
+  type TabType = 'dashboard' | 'create_estimate' | 'products' | 'clients' | 'statements' | 'reports' | 'audit_logs' | 'backup' | 'print_customizer' | 'scan_camera' | 'settings';
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
   const [tabHistory, setTabHistory] = useState<TabType[]>(['dashboard']);
+  const [showCommandPalette, setShowCommandPalette] = useState<boolean>(false);
+
+  // Global Ctrl/Cmd + K shortcut for Command Palette
+  useEffect(() => {
+    const handleGlobalCmdK = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalCmdK);
+    return () => window.removeEventListener('keydown', handleGlobalCmdK);
+  }, []);
 
   // Centralized Navigation helper that records tab history
   const navigateToTab = (newTab: TabType, options?: { replace?: boolean }) => {
@@ -952,6 +970,60 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Helper to merge Clients, Products, and Estimates across Server, Firestore, and Local Storage without data loss
+  const mergeMultiSourceRecords = (
+    targetPhone: string,
+    sources: Array<{ clients?: any[]; products?: any[]; estimates?: any[] } | null | undefined>
+  ) => {
+    const clientMap = new Map<string, Client>();
+    const productMap = new Map<string, Product>();
+    const estimateMap = new Map<string, Estimate>();
+    const deletedIds = getDeletedEstimateIds(targetPhone);
+
+    for (const src of sources) {
+      if (!src) continue;
+      if (Array.isArray(src.clients)) {
+        for (const c of src.clients) {
+          if (!c || typeof c !== 'object') continue;
+          const key = String(c.id || `${c.name || ''}_${c.phone || ''}`).trim();
+          if (key && !clientMap.has(key)) {
+            clientMap.set(key, c);
+          }
+        }
+      }
+      if (Array.isArray(src.products)) {
+        for (const p of sanitizeProducts(src.products)) {
+          if (!p || typeof p !== 'object') continue;
+          const key = String(p.id || p.name || '').trim();
+          if (key && !productMap.has(key)) {
+            productMap.set(key, p);
+          }
+        }
+      }
+      if (Array.isArray(src.estimates)) {
+        for (const e of sanitizeEstimates(src.estimates)) {
+          if (!e || typeof e !== 'object') continue;
+          const key = String(e.id || '').trim();
+          if (key && !deletedIds.has(Number(e.id)) && !estimateMap.has(key)) {
+            estimateMap.set(key, e);
+          }
+        }
+      }
+    }
+
+    const mergedEstimates = Array.from(estimateMap.values()).sort((a, b) => {
+      const da = new Date(a.date || 0).getTime() || 0;
+      const db = new Date(b.date || 0).getTime() || 0;
+      return db - da;
+    });
+
+    return {
+      clients: Array.from(clientMap.values()),
+      products: Array.from(productMap.values()),
+      estimates: mergedEstimates
+    };
+  };
+
   // Automatic multi-device data pull sync on startup or when user state loads
   useEffect(() => {
     if (isForceOfflineActive) {
@@ -959,172 +1031,133 @@ export default function App() {
       return;
     }
     if (!currentUser) return;
-    if (dbUsers.length === 0) return;
     const userMatched = dbUsers.find(u => u.phone === currentUser);
-    if (!userMatched || !userMatched.password) {
-      setIsInitialPullDone(true);
-      return;
-    }
+    const effectivePassword = userMatched?.password || '1234';
 
     const startupSync = async () => {
       setSyncMessage('Downloading your latest multi-device cloud backup. Please do not close or reload this window.');
       setIsSyncingLogin(true);
       try {
-        const response = await fetch(`/api/sync/${currentUser}?password=${encodeURIComponent(userMatched.password)}`);
-        if (response.ok) {
-          const syncData = await response.json();
-          
-          const clientsKey = getClientsKey(currentUser);
-          const productsKey = getProductsKey(currentUser);
-          const estimatesKey = getEstimatesKey(currentUser);
-          const mutationKey = getMutationKey(currentUser);
-          const syncedOnceKey = getSyncedOnceKey(currentUser);
+        const [srvResult, fsResult] = await Promise.allSettled([
+          fetch(`/api/sync/${currentUser}?password=${encodeURIComponent(effectivePassword)}`).then(r => (r.ok ? r.json() : null)),
+          isFirebaseConfigured() ? fetchUserSyncFromFirestore(currentUser) : Promise.resolve(null)
+        ]);
 
-          const oldClientsKey = `off_clients_${currentUser}`;
-          const oldProductsKey = `off_products_${currentUser}`;
-          const oldEstimatesKey = `off_estimates_${currentUser}`;
+        const syncData = srvResult.status === 'fulfilled' ? srvResult.value : null;
+        const firestoreData = fsResult.status === 'fulfilled' ? fsResult.value : null;
 
-          console.log("[Auto-Sync] Fetching and validating server payload against local state...");
-          
-          let localClients: Client[] = [];
-          let localProducts: Product[] = [];
-          let localEstimates: Estimate[] = [];
-          
+        const clientsKey = getClientsKey(currentUser);
+        const productsKey = getProductsKey(currentUser);
+        const estimatesKey = getEstimatesKey(currentUser);
+        const mutationKey = getMutationKey(currentUser);
+        const syncedOnceKey = getSyncedOnceKey(currentUser);
+
+        const oldClientsKey = `off_clients_${currentUser}`;
+        const oldProductsKey = `off_products_${currentUser}`;
+        const oldEstimatesKey = `off_estimates_${currentUser}`;
+
+        let localClients: Client[] = [];
+        let localProducts: Product[] = [];
+        let localEstimates: Estimate[] = [];
+
+        try {
+          const rawC = safeStorage.getItem(clientsKey) || safeStorage.getItem(oldClientsKey);
+          if (rawC) localClients = JSON.parse(rawC);
+          const rawP = safeStorage.getItem(productsKey) || safeStorage.getItem(oldProductsKey);
+          if (rawP) localProducts = JSON.parse(rawP);
+          const rawE = safeStorage.getItem(estimatesKey) || safeStorage.getItem(oldEstimatesKey) || safeStorage.getItem(`user_${currentUser}_estimates`);
+          if (rawE) localEstimates = filterDeletedEstimates(sanitizeEstimates(JSON.parse(rawE)), currentUser);
+        } catch (e) {}
+
+        // Also check static /Saved_Bills_Data.json fallback if all sources have 0 estimates
+        let staticBackupData: any = null;
+        const hasAnyEstimates =
+          (Array.isArray(syncData?.estimates) && syncData.estimates.length > 0) ||
+          (Array.isArray(firestoreData?.estimates) && firestoreData.estimates.length > 0) ||
+          localEstimates.length > 0;
+        if (!hasAnyEstimates) {
           try {
-            const rawC = safeStorage.getItem(clientsKey) || safeStorage.getItem(oldClientsKey);
-            if (rawC) localClients = JSON.parse(rawC);
-            const rawP = safeStorage.getItem(productsKey) || safeStorage.getItem(oldProductsKey);
-            if (rawP) localProducts = JSON.parse(rawP);
-            const rawE = safeStorage.getItem(estimatesKey) || safeStorage.getItem(oldEstimatesKey) || safeStorage.getItem(`user_${currentUser}_estimates`);
-            if (rawE) localEstimates = filterDeletedEstimates(sanitizeEstimates(JSON.parse(rawE)), currentUser);
-          } catch (e) {}
-
-          const serverClients = Array.isArray(syncData.clients) ? syncData.clients : [];
-          const serverProducts = Array.isArray(syncData.products) ? syncData.products : [];
-          const serverEstimates = Array.isArray(syncData.estimates)
-            ? filterDeletedEstimates(sanitizeEstimates(syncData.estimates), currentUser)
-            : [];
-
-          const serverEpoch = syncData.last_synced_millis || (syncData.updatedAt ? new Date(syncData.updatedAt).getTime() : 0);
-          const localEpoch = parseInt(safeStorage.getItem(`last_local_mutation_${currentUser}`) || safeStorage.getItem(mutationKey) || "0");
-
-          // Skip scan fallback or alternate reads if user is newly registered
-          const isNewlyReg = safeStorage.getItem(`newly_registered_${currentUser}`) === 'true' || safeStorage.getItem(`user_${currentUser}_newly_registered`) === 'true';
-          const hasDeletedAny = getDeletedEstimateIds(currentUser).size > 0;
-
-          // Prevent overwrite if local state is newer or contains more data than the cloud snapshot
-          const isLocalNewerOrLarger = !isNewlyReg && ((localEpoch > serverEpoch) || (localEstimates.length > serverEstimates.length));
-
-          if (isLocalNewerOrLarger && (localEstimates.length > 0 || hasDeletedAny)) {
-            console.log("[Auto-Sync] Local state is newer/larger. Preventing overwrite by older cloud snapshot.");
-            
-            // Merge states: incorporate any server-side estimates that might be missing locally (excluding deleted ones)
-            const mergedEstimates = [...localEstimates];
-            if (localEpoch < serverEpoch) {
-              serverEstimates.forEach(srvEst => {
-                if (!mergedEstimates.some(e => e.id === srvEst.id)) {
-                  mergedEstimates.push(srvEst);
-                }
-              });
+            const staticRes = await fetch('/Saved_Bills_Data.json');
+            if (staticRes.ok) {
+              staticBackupData = await staticRes.json();
             }
-
-            const mergedClients = localClients;
-
-            const mergedProducts = localProducts.length >= serverProducts.length ? localProducts : serverProducts;
-
-            // Save merged state back to local storage
-            setDbClients(mergedClients);
-            safeStorage.setItem(clientsKey, JSON.stringify(mergedClients));
-            safeStorage.setItem(oldClientsKey, JSON.stringify(mergedClients));
-
-            setDbProducts(mergedProducts);
-            safeStorage.setItem(productsKey, JSON.stringify(mergedProducts));
-            safeStorage.setItem(oldProductsKey, JSON.stringify(mergedProducts));
-
-            setDbEstimates(mergedEstimates);
-            safeStorage.setItem(estimatesKey, JSON.stringify(mergedEstimates));
-            safeStorage.setItem(oldEstimatesKey, JSON.stringify(mergedEstimates));
-            safeStorage.setItem(`user_${currentUser}_estimates`, JSON.stringify(mergedEstimates));
-
-            const syncTime = Math.max(localEpoch, serverEpoch) + 1000;
-            try {
-              safeStorage.setItem(mutationKey, syncTime.toString());
-              safeStorage.setItem(`user_${currentUser}_last_synced_millis`, syncTime.toString());
-              lastLocalMutationTimeRef.current = syncTime;
-              setLastLocalMutationTime(syncTime);
-              safeStorage.setItem(`last_local_mutation_${currentUser}`, syncTime.toString());
-              safeStorage.setItem(syncedOnceKey, 'true');
-            } catch (e) {}
-
-            const catchupPayload = {
-              password: userMatched.password,
-              businessName: businessName || syncData.businessName || "BillSync Pro",
-              clients: mergedClients,
-              products: mergedProducts,
-              estimates: mergedEstimates,
-              last_synced_millis: syncTime
-            };
-
-            // Catch-up upload to sync server to overwrite with final verified merged layout
-            fetch(`/api/sync/${currentUser}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(catchupPayload)
-            }).then(r => {
-              if (r.ok) {
-                console.log("[Auto-Sync] Cloud successfully updated to catch up with latest local state.");
-              }
-            }).catch(e => console.error("[Auto-Sync] Catch-up sync failed:", e));
-
-          } else {
-            // Server has the definitive newer/larger state, overwrite local
-            console.log("[Auto-Sync] Server has newer/larger state. Overwriting local state with fresh cloud data.");
-            setDbClients(serverClients);
-            safeStorage.setItem(clientsKey, JSON.stringify(serverClients));
-            safeStorage.setItem(oldClientsKey, JSON.stringify(serverClients));
-
-            setDbProducts(serverProducts);
-            safeStorage.setItem(productsKey, JSON.stringify(serverProducts));
-            safeStorage.setItem(oldProductsKey, JSON.stringify(serverProducts));
-
-            setDbEstimates(serverEstimates);
-            safeStorage.setItem(estimatesKey, JSON.stringify(serverEstimates));
-            safeStorage.setItem(oldEstimatesKey, JSON.stringify(serverEstimates));
-            safeStorage.setItem(`user_${currentUser}_estimates`, JSON.stringify(serverEstimates));
-
-            if (syncData.businessName) {
-              setBusinessName(syncData.businessName);
-            }
-            if (syncData.updatedAt) {
-              setLastSyncedAt(syncData.updatedAt);
-            }
-            
-            const finalServerEpoch = Math.max(serverEpoch, localEpoch);
-            try {
-              safeStorage.setItem(mutationKey, finalServerEpoch.toString());
-              safeStorage.setItem(`user_${currentUser}_last_synced_millis`, finalServerEpoch.toString());
-              lastLocalMutationTimeRef.current = finalServerEpoch;
-              setLastLocalMutationTime(finalServerEpoch);
-              safeStorage.setItem(syncedOnceKey, 'true');
-            } catch (e) {}
-          }
-
-          // Trigger immediate hard re-render on active UI layout
-          setRenderKey(prev => prev + 1);
-        } else {
-          console.warn("[Auto-Sync] Server returned error, falling back to local storage.");
-          const clientsKey = getClientsKey(currentUser);
-          const productsKey = getProductsKey(currentUser);
-          const estimatesKey = getEstimatesKey(currentUser);
-          try {
-            const localC = safeStorage.getItem(clientsKey);
-            if (localC) setDbClients(JSON.parse(localC));
-            const localP = safeStorage.getItem(productsKey);
-            if (localP) setDbProducts(JSON.parse(localP));
-            const localE = safeStorage.getItem(estimatesKey);
-            if (localE) setDbEstimates(sanitizeEstimates(JSON.parse(localE)));
-          } catch (e) {}
+          } catch {}
         }
+
+        const serverEpoch = Number(syncData?.last_synced_millis) || (syncData?.updatedAt ? new Date(syncData.updatedAt).getTime() : 0);
+        const firestoreEpoch = Number(firestoreData?.last_synced_millis) || (firestoreData?.updatedAt ? new Date(firestoreData.updatedAt).getTime() : 0);
+        const localEpoch = parseInt(safeStorage.getItem(`last_local_mutation_${currentUser}`) || safeStorage.getItem(mutationKey) || '0');
+
+        // Order sources from newest/richest first so the freshest version of each ID wins
+        const orderedSources =
+          localEpoch > Math.max(serverEpoch, firestoreEpoch)
+            ? [{ clients: localClients, products: localProducts, estimates: localEstimates }, syncData, firestoreData, staticBackupData]
+            : [syncData, firestoreData, { clients: localClients, products: localProducts, estimates: localEstimates }, staticBackupData];
+
+        const merged = mergeMultiSourceRecords(currentUser, orderedSources);
+
+        setDbClients(merged.clients);
+        safeStorage.setItem(clientsKey, JSON.stringify(merged.clients));
+        safeStorage.setItem(oldClientsKey, JSON.stringify(merged.clients));
+
+        setDbProducts(merged.products);
+        safeStorage.setItem(productsKey, JSON.stringify(merged.products));
+        safeStorage.setItem(oldProductsKey, JSON.stringify(merged.products));
+
+        setDbEstimates(merged.estimates);
+        safeStorage.setItem(estimatesKey, JSON.stringify(merged.estimates));
+        safeStorage.setItem(oldEstimatesKey, JSON.stringify(merged.estimates));
+        safeStorage.setItem(`user_${currentUser}_estimates`, JSON.stringify(merged.estimates));
+
+        const resolvedBusName = syncData?.businessName || firestoreData?.businessName || businessName || 'BillSync Pro';
+        if (resolvedBusName) {
+          setBusinessName(resolvedBusName);
+        }
+        if (syncData?.updatedAt || firestoreData?.updatedAt) {
+          setLastSyncedAt(syncData?.updatedAt || firestoreData?.updatedAt);
+        }
+
+        const finalEpoch = Math.max(serverEpoch, firestoreEpoch, localEpoch, Date.now());
+        try {
+          safeStorage.setItem(mutationKey, finalEpoch.toString());
+          safeStorage.setItem(`user_${currentUser}_last_synced_millis`, finalEpoch.toString());
+          safeStorage.setItem(`last_local_mutation_${currentUser}`, finalEpoch.toString());
+          lastLocalMutationTimeRef.current = finalEpoch;
+          setLastLocalMutationTime(finalEpoch);
+          safeStorage.setItem(syncedOnceKey, 'true');
+        } catch (e) {}
+
+        // If merged state has more records than server or Firestore, push merged state back so all PCs share identical data
+        const srvEstCount = Array.isArray(syncData?.estimates) ? syncData.estimates.length : 0;
+        const fsEstCount = Array.isArray(firestoreData?.estimates) ? firestoreData.estimates.length : 0;
+        if (merged.estimates.length > srvEstCount || merged.clients.length > (syncData?.clients?.length || 0)) {
+          fetch(`/api/sync/${currentUser}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              password: effectivePassword,
+              businessName: resolvedBusName,
+              clients: merged.clients,
+              products: merged.products,
+              estimates: merged.estimates,
+              last_synced_millis: finalEpoch,
+              force: true
+            })
+          }).catch(() => {});
+        }
+        if (isFirebaseConfigured() && (merged.estimates.length > fsEstCount || merged.clients.length > (firestoreData?.clients?.length || 0))) {
+          pushUserSyncToFirestore(currentUser, {
+            businessName: resolvedBusName,
+            clients: merged.clients,
+            products: merged.products,
+            estimates: merged.estimates,
+            stockLogs: dbStockLogs,
+            costFallbackPct,
+            last_synced_millis: finalEpoch
+          }).catch(() => {});
+        }
+
+        setRenderKey(prev => prev + 1);
       } catch (err) {
         console.warn("[Auto-Sync] Startup sync failed (network offline or server down), using local storage fallback:", err);
         const clientsKey = getClientsKey(currentUser);
@@ -1145,12 +1178,13 @@ export default function App() {
     };
 
     startupSync();
-  }, [currentUser, dbUsers]);
+  }, [currentUser]);
 
-  // Real-time Multi-PC Synchronization (Firestore live listener + 6-second LAN/Cloud Server poll)
+  // Real-time Multi-PC Synchronization (Firestore live listener + 4-second LAN/Cloud Server poll)
   useEffect(() => {
     if (isForceOfflineActive || !currentUser || !isInitialPullDone) return;
     const userMatched = dbUsers.find(u => u.phone === currentUser);
+    const pollPassword = userMatched?.password || '1234';
 
     const applyIncomingRemoteSync = (remoteData: {
       businessName?: string;
@@ -1163,7 +1197,6 @@ export default function App() {
       if (isPendingPushRef.current) return;
       const remoteEpoch = Number(remoteData.last_synced_millis) || (remoteData.updatedAt ? new Date(remoteData.updatedAt).getTime() : 0);
       const localEpoch = Number(lastLocalMutationTimeRef.current) || 0;
-      if (!remoteEpoch || remoteEpoch <= localEpoch) return;
 
       const incomingClients = Array.isArray(remoteData.clients) ? remoteData.clients : [];
       const incomingProducts = Array.isArray(remoteData.products) ? sanitizeProducts(remoteData.products) : [];
@@ -1179,6 +1212,15 @@ export default function App() {
       const estimatesKey = getEstimatesKey(currentUser);
       const mutationKey = getMutationKey(currentUser);
 
+      let currentEstCount = 0;
+      try {
+        const rawE = safeStorage.getItem(estimatesKey);
+        if (rawE) currentEstCount = JSON.parse(rawE).length;
+      } catch {}
+
+      // Apply if remote timestamp is newer OR if this PC currently has fewer estimates than the server
+      if (remoteEpoch <= localEpoch && incomingEstimates.length <= currentEstCount) return;
+
       setDbClients(incomingClients);
       safeStorage.setItem(clientsKey, JSON.stringify(incomingClients));
 
@@ -1191,12 +1233,13 @@ export default function App() {
       if (remoteData.businessName) setBusinessName(remoteData.businessName);
       if (remoteData.updatedAt) setLastSyncedAt(remoteData.updatedAt);
 
-      lastLocalMutationTimeRef.current = remoteEpoch;
-      setLastLocalMutationTime(remoteEpoch);
+      const nextEpoch = Math.max(remoteEpoch, localEpoch, Date.now());
+      lastLocalMutationTimeRef.current = nextEpoch;
+      setLastLocalMutationTime(nextEpoch);
       try {
-        safeStorage.setItem(mutationKey, remoteEpoch.toString());
-        safeStorage.setItem(`user_${currentUser}_last_synced_millis`, remoteEpoch.toString());
-        safeStorage.setItem(`last_local_mutation_${currentUser}`, remoteEpoch.toString());
+        safeStorage.setItem(mutationKey, nextEpoch.toString());
+        safeStorage.setItem(`user_${currentUser}_last_synced_millis`, nextEpoch.toString());
+        safeStorage.setItem(`last_local_mutation_${currentUser}`, nextEpoch.toString());
       } catch {}
     };
 
@@ -1205,23 +1248,63 @@ export default function App() {
       applyIncomingRemoteSync(cloudData);
     });
 
-    // 2. Periodic 6-second LAN/Cloud Server poll across PCs
+    // 2. Periodic 4-second LAN/Cloud Server poll across PCs
     const pollInterval = setInterval(async () => {
-      if (isPendingPushRef.current || !navigator.onLine || !userMatched?.password) return;
+      if (isPendingPushRef.current || !navigator.onLine) return;
       try {
-        const res = await fetch(`/api/sync/${currentUser}?password=${encodeURIComponent(userMatched.password)}`);
+        const res = await fetch(`/api/sync/${currentUser}?password=${encodeURIComponent(pollPassword)}`);
         if (res.ok) {
           const srvData = await res.json();
           applyIncomingRemoteSync(srvData);
         }
       } catch {}
-    }, 6000);
+    }, 4000);
 
     return () => {
       unsubFirestore();
       clearInterval(pollInterval);
     };
   }, [currentUser, dbUsers, isInitialPullDone, isForceOfflineActive]);
+
+  // Real-time unified file writer: keeps Saved_Bills_Data.json updated with all bills, products, parties & stockLogs
+  const syncAllDataToSavedBillsFile = (
+    clientsList: Client[],
+    productsList: Product[],
+    estimatesList: Estimate[],
+    stockLogsList?: StockLog[],
+    lastBillSerial?: string
+  ) => {
+    try {
+      const activeLogs = stockLogsList || dbStockLogs;
+      const serial =
+        lastBillSerial ||
+        (estimatesList.length > 0 ? estimatesList[estimatesList.length - 1]?.serial : '') ||
+        '';
+      const nowIso = new Date().toISOString();
+      const fullFilePayload = {
+        fileName: 'Saved_Bills_Data.json',
+        businessName,
+        userPhone: currentUser || '',
+        lastSavedBillSerial: serial,
+        updatedAt: nowIso,
+        clients: clientsList,
+        products: productsList,
+        estimates: estimatesList,
+        stockLogs: activeLogs
+      };
+
+      safeStorage.setItem('saved_bills_file_data', JSON.stringify(fullFilePayload));
+
+      fetch('/api/save-bill-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...fullFilePayload,
+          replaceAll: true
+        })
+      }).catch(() => {});
+    } catch (e) {}
+  };
 
   // Synchronous force cloud save helper
   const forceCloudSaveSynchronous = async (
@@ -1231,13 +1314,14 @@ export default function App() {
     updatedStockLogs?: StockLog[],
     forceUpload: boolean = false
   ) => {
+    syncAllDataToSavedBillsFile(updatedClients, updatedProducts, updatedEstimates, updatedStockLogs);
     if (isForceOfflineActive) {
       console.log("[Force Cloud Save] Offline mode is active. Skipping server upload.");
       return false;
     }
     if (!currentUser) return false;
     const userMatched = dbUsers.find(u => u.phone === currentUser);
-    if (!userMatched || !userMatched.password) return false;
+    const effectivePassword = userMatched?.password || '1234';
 
     const now = Date.now();
     lastLocalMutationTimeRef.current = now;
@@ -1249,7 +1333,7 @@ export default function App() {
     } catch (e) {}
 
     const payload = {
-      password: userMatched.password,
+      password: effectivePassword,
       businessName: businessName,
       clients: updatedClients,
       products: updatedProducts,
@@ -1282,7 +1366,7 @@ export default function App() {
         showToast("⚠️ Sync conflict! Server contains a newer backup.");
         setSyncConflictDetected(true);
         // Automatic download sync on conflict to ensure we merge safely
-        const getResponse = await fetch(`/api/sync?phone=${encodeURIComponent(currentUser)}&password=${encodeURIComponent(userMatched.password)}`);
+        const getResponse = await fetch(`/api/sync?phone=${encodeURIComponent(currentUser)}&password=${encodeURIComponent(effectivePassword)}`);
         if (getResponse.ok) {
           const syncData = await getResponse.json();
           const clients = Array.isArray(syncData.clients) ? syncData.clients : [];
@@ -1371,9 +1455,9 @@ export default function App() {
     updatedEstimates: Estimate[],
     updatedStockLogs?: StockLog[]
   ) => {
-    if (!currentUser) return;
-    
     const activeLogs = updatedStockLogs || dbStockLogs;
+    syncAllDataToSavedBillsFile(updatedClients, updatedProducts, updatedEstimates, activeLogs);
+    if (!currentUser) return;
 
     // Ensure local data is written to a verified, user-isolated key inside browser's persistent layer
     const dataSnapshot = {
@@ -1777,109 +1861,81 @@ export default function App() {
     setIsSyncingLogin(true);
     showToast(`🔄 Logging in: Syncing cloud database...`);
 
-    // Instant cloud synchronization pull upon successful login
-    if (password) {
+    const effectivePassword = password || dbUsers.find(u => u.phone === phone)?.password || '1234';
+
+    // Instant cloud + server synchronization pull upon successful login
+    try {
+      const [srvResult, fsResult] = await Promise.allSettled([
+        fetch(`/api/sync/${phone}?password=${encodeURIComponent(effectivePassword)}`).then(r => (r.ok ? r.json() : null)),
+        isFirebaseConfigured() ? fetchUserSyncFromFirestore(phone) : Promise.resolve(null)
+      ]);
+
+      const syncData = srvResult.status === 'fulfilled' ? srvResult.value : null;
+      const firestoreData = fsResult.status === 'fulfilled' ? fsResult.value : null;
+
       try {
-        const response = await fetch(`/api/sync/${phone}?password=${encodeURIComponent(password)}`);
-        if (response.ok) {
-          const syncData = await response.json();
-          
-          try {
-            safeStorage.removeItem(newlyRegisteredKey);
-          } catch (e) {}
+        safeStorage.removeItem(newlyRegisteredKey);
+      } catch (e) {}
 
-          const clients = Array.isArray(syncData.clients) ? syncData.clients : [];
-          const products = Array.isArray(syncData.products) ? syncData.products : [];
-          const estimates = Array.isArray(syncData.estimates)
-            ? filterDeletedEstimates(sanitizeEstimates(syncData.estimates), phone)
-            : [];
+      const localClients = JSON.parse(safeStorage.getItem(clientsKey) || '[]');
+      const localProducts = JSON.parse(safeStorage.getItem(productsKey) || '[]');
+      const localEstimates = filterDeletedEstimates(JSON.parse(safeStorage.getItem(estimatesKey) || '[]'), phone);
 
-          // Failsafe check: Prevent empty cloud server responses from overwriting populated local databases
-          const localClients = JSON.parse(safeStorage.getItem(clientsKey) || '[]');
-          const localProducts = JSON.parse(safeStorage.getItem(productsKey) || '[]');
-          const localEstimates = filterDeletedEstimates(JSON.parse(safeStorage.getItem(estimatesKey) || '[]'), phone);
+      const merged = mergeMultiSourceRecords(phone, [
+        syncData,
+        firestoreData,
+        { clients: localClients, products: localProducts, estimates: localEstimates }
+      ]);
 
-          const serverIsEmpty = clients.length === 0 && products.length === 0 && estimates.length === 0;
-          const localHasData = localClients.length > 0 || localProducts.length > 0 || localEstimates.length > 0;
+      const oldClientsKey = `off_clients_${phone}`;
+      const oldProductsKey = `off_products_${phone}`;
+      const oldEstimatesKey = `off_estimates_${phone}`;
 
-          if (serverIsEmpty && localHasData) {
-            console.log("[Login Sync] Server contain empty lists but local storage has data. Retaining local data & syncing to cloud.");
-            setDbClients(localClients);
-            setDbProducts(localProducts);
-            setDbEstimates(localEstimates);
-            
-            // Queue mutation to upload this data to the empty cloud database
-            setTimeout(() => {
-              registerLocalMutation();
-            }, 1000);
-          } else {
-            const oldClientsKey = `off_clients_${phone}`;
-            const oldProductsKey = `off_products_${phone}`;
-            const oldEstimatesKey = `off_estimates_${phone}`;
+      setDbClients(merged.clients);
+      safeStorage.setItem(clientsKey, JSON.stringify(merged.clients));
+      safeStorage.setItem(oldClientsKey, JSON.stringify(merged.clients));
 
-            setDbClients(clients);
-            safeStorage.setItem(clientsKey, JSON.stringify(clients));
-            safeStorage.setItem(oldClientsKey, JSON.stringify(clients));
+      setDbProducts(merged.products);
+      safeStorage.setItem(productsKey, JSON.stringify(merged.products));
+      safeStorage.setItem(oldProductsKey, JSON.stringify(merged.products));
 
-            setDbProducts(products);
-            safeStorage.setItem(productsKey, JSON.stringify(products));
-            safeStorage.setItem(oldProductsKey, JSON.stringify(products));
+      setDbEstimates(merged.estimates);
+      safeStorage.setItem(estimatesKey, JSON.stringify(merged.estimates));
+      safeStorage.setItem(oldEstimatesKey, JSON.stringify(merged.estimates));
+      safeStorage.setItem(`user_${phone}_estimates`, JSON.stringify(merged.estimates));
 
-            setDbEstimates(estimates);
-            safeStorage.setItem(estimatesKey, JSON.stringify(estimates));
-            safeStorage.setItem(oldEstimatesKey, JSON.stringify(estimates));
-          }
-
-          if (syncData.businessName) {
-            setBusinessName(syncData.businessName);
-          }
-          if (syncData.updatedAt) {
-            setLastSyncedAt(syncData.updatedAt);
-          }
-          
-          const serverEpoch = syncData.last_synced_millis || (syncData.updatedAt ? new Date(syncData.updatedAt).getTime() : Date.now());
-          safeStorage.setItem(mutationKey, serverEpoch.toString());
-          safeStorage.setItem(`user_${phone}_last_synced_millis`, serverEpoch.toString());
-          lastLocalMutationTimeRef.current = serverEpoch;
-          setLastLocalMutationTime(serverEpoch);
-          
-          try {
-            safeStorage.setItem(syncedOnceKey, 'true');
-          } catch (e) {}
-          
-          // Trigger immediate hard re-render on successful download sync
-          setRenderKey(prev => prev + 1);
-          showToast("✓ Cloud Data Sync complete!");
-        } else {
-          // Fallback to local storage if server response not OK
-          try {
-            setDbClients(JSON.parse(safeStorage.getItem(clientsKey) || '[]'));
-            setDbProducts(JSON.parse(safeStorage.getItem(productsKey) || '[]'));
-            setDbEstimates(sanitizeEstimates(JSON.parse(safeStorage.getItem(estimatesKey) || '[]')));
-            setDbStockLogs(JSON.parse(safeStorage.getItem(stockLogsKey) || '[]'));
-          } catch (e) {}
-        }
-      } catch (err) {
-        console.warn("Could not sync cloud data on login:", err);
-        // Fallback to local storage if offline
-        try {
-          setDbClients(JSON.parse(safeStorage.getItem(clientsKey) || '[]'));
-          setDbProducts(JSON.parse(safeStorage.getItem(productsKey) || '[]'));
-          setDbEstimates(sanitizeEstimates(JSON.parse(safeStorage.getItem(estimatesKey) || '[]')));
-          setDbStockLogs(JSON.parse(safeStorage.getItem(stockLogsKey) || '[]'));
-        } catch (e) {}
-      } finally {
-        setIsInitialPullDone(true);
-        setIsSyncingLogin(false);
+      const resolvedBusName = syncData?.businessName || firestoreData?.businessName || busName;
+      if (resolvedBusName) {
+        setBusinessName(resolvedBusName);
       }
-    } else {
-      // No password provided, fallback to local storage
+      if (syncData?.updatedAt || firestoreData?.updatedAt) {
+        setLastSyncedAt(syncData?.updatedAt || firestoreData?.updatedAt);
+      }
+
+      const serverEpoch =
+        Number(syncData?.last_synced_millis) ||
+        Number(firestoreData?.last_synced_millis) ||
+        (syncData?.updatedAt ? new Date(syncData.updatedAt).getTime() : Date.now());
+      safeStorage.setItem(mutationKey, serverEpoch.toString());
+      safeStorage.setItem(`user_${phone}_last_synced_millis`, serverEpoch.toString());
+      lastLocalMutationTimeRef.current = serverEpoch;
+      setLastLocalMutationTime(serverEpoch);
+
+      try {
+        safeStorage.setItem(syncedOnceKey, 'true');
+      } catch (e) {}
+
+      setRenderKey(prev => prev + 1);
+      showToast("✓ Server & Cloud Data Sync complete!");
+    } catch (err) {
+      console.warn("Could not sync cloud data on login:", err);
       try {
         setDbClients(JSON.parse(safeStorage.getItem(clientsKey) || '[]'));
         setDbProducts(JSON.parse(safeStorage.getItem(productsKey) || '[]'));
         setDbEstimates(sanitizeEstimates(JSON.parse(safeStorage.getItem(estimatesKey) || '[]')));
         setDbStockLogs(JSON.parse(safeStorage.getItem(stockLogsKey) || '[]'));
       } catch (e) {}
+    } finally {
       setIsInitialPullDone(true);
       setIsSyncingLogin(false);
     }
@@ -1898,6 +1954,7 @@ export default function App() {
         let resolvedBusinessName = 'My Counter';
         let resolvedPassword = '';
         let resolvedSyncData: any = null;
+        let firestoreSyncData: any = null;
 
         // 1. Check Express Server (/api/auth/permanent-ip/:ip)
         try {
@@ -1907,21 +1964,29 @@ export default function App() {
             if (data?.user?.phone) {
               resolvedPhone = String(data.user.phone).trim();
               resolvedBusinessName = data.user.businessName || 'My Counter';
-              resolvedPassword = data.user.password || '';
+              resolvedPassword = data.user.password || '1234';
               resolvedSyncData = data.syncData || null;
             }
           }
         } catch {}
 
-        // 2. Fallback to Firebase Cloud Firestore lookup by permanent IP
-        if (!resolvedPhone) {
-          const fsMatch = await findUserByPermanentIpFromFirestore(targetPermanentIp);
-          if (fsMatch && fsMatch.phone) {
-            resolvedPhone = fsMatch.phone;
-            resolvedBusinessName = fsMatch.businessName || 'My Counter';
-            resolvedSyncData = fsMatch;
+        // 2. Also check Firebase Cloud Firestore for this Permanent IP / User ID
+        try {
+          if (isFirebaseConfigured()) {
+            const fsMatch = resolvedPhone
+              ? await fetchUserSyncFromFirestore(resolvedPhone)
+              : await findUserByPermanentIpFromFirestore(targetPermanentIp);
+            if (fsMatch) {
+              firestoreSyncData = fsMatch;
+              if (!resolvedPhone && (fsMatch as any).phone) {
+                resolvedPhone = (fsMatch as any).phone;
+              }
+              if (fsMatch.businessName && resolvedBusinessName === 'My Counter') {
+                resolvedBusinessName = fsMatch.businessName;
+              }
+            }
           }
-        }
+        } catch {}
 
         // 3. Fallback to local dbUsers matching this permanent IP
         if (!resolvedPhone && dbUsers.length > 0) {
@@ -1929,7 +1994,7 @@ export default function App() {
           if (localMatch) {
             resolvedPhone = localMatch.phone;
             resolvedBusinessName = localMatch.businessName || 'My Counter';
-            resolvedPassword = localMatch.password || '';
+            resolvedPassword = localMatch.password || '1234';
           }
         }
 
@@ -1940,31 +2005,35 @@ export default function App() {
           window.history.replaceState({}, '', '/');
         } catch {}
 
-        // Pre-seed synced data if returned so the counter screen has all records immediately
-        if (resolvedSyncData) {
-          const cKey = getClientsKey(resolvedPhone);
-          const pKey = getProductsKey(resolvedPhone);
-          const eKey = getEstimatesKey(resolvedPhone);
-          if (Array.isArray(resolvedSyncData.clients) && resolvedSyncData.clients.length > 0) {
-            safeStorage.setItem(cKey, JSON.stringify(resolvedSyncData.clients));
-          }
-          if (Array.isArray(resolvedSyncData.products) && resolvedSyncData.products.length > 0) {
-            safeStorage.setItem(pKey, JSON.stringify(resolvedSyncData.products));
-          }
-          if (Array.isArray(resolvedSyncData.estimates) && resolvedSyncData.estimates.length > 0) {
-            safeStorage.setItem(eKey, JSON.stringify(resolvedSyncData.estimates));
-          }
+        // Pre-seed merged Server + Firestore synced data into localStorage before login completes
+        const mergedSeed = mergeMultiSourceRecords(resolvedPhone, [resolvedSyncData, firestoreSyncData]);
+        const cKey = getClientsKey(resolvedPhone);
+        const pKey = getProductsKey(resolvedPhone);
+        const eKey = getEstimatesKey(resolvedPhone);
+        if (mergedSeed.clients.length > 0) {
+          safeStorage.setItem(cKey, JSON.stringify(mergedSeed.clients));
+          safeStorage.setItem(`off_clients_${resolvedPhone}`, JSON.stringify(mergedSeed.clients));
+        }
+        if (mergedSeed.products.length > 0) {
+          safeStorage.setItem(pKey, JSON.stringify(mergedSeed.products));
+          safeStorage.setItem(`off_products_${resolvedPhone}`, JSON.stringify(mergedSeed.products));
+        }
+        if (mergedSeed.estimates.length > 0) {
+          safeStorage.setItem(eKey, JSON.stringify(mergedSeed.estimates));
+          safeStorage.setItem(`off_estimates_${resolvedPhone}`, JSON.stringify(mergedSeed.estimates));
+          safeStorage.setItem(`user_${resolvedPhone}_estimates`, JSON.stringify(mergedSeed.estimates));
         }
 
+        const finalPassword = resolvedPassword || '1234';
         handleUpdateUsers([
           {
             phone: resolvedPhone,
             businessName: resolvedBusinessName,
-            password: resolvedPassword || '1234'
+            password: finalPassword
           }
         ]);
 
-        await handleLoginSuccess(resolvedPhone, resolvedBusinessName, 'admin', resolvedPassword || undefined);
+        await handleLoginSuccess(resolvedPhone, resolvedBusinessName, 'admin', finalPassword);
         const permInfo = getPermanentIpForUser(resolvedPhone);
         showToast(`✓ Auto-Logged In to ID +91 ${resolvedPhone} (Permanent IP: ${permInfo.ipWithPort})`);
       } catch (err) {
@@ -1978,12 +2047,19 @@ export default function App() {
     };
   }, []);
 
-  // Background Auto-sync whenever local database properties update (debentured/delayed PWA behaviour)
+  // Background Auto-sync whenever local database properties update (real-time Saved_Bills_Data.json + Server + Firestore push)
   useEffect(() => {
-    if (isForceOfflineActive) return;
     if (!currentUser || !isInitialPullDone) return;
+    // Never auto-push completely empty state right after login before records load
+    if (dbClients.length === 0 && dbProducts.length === 0 && dbEstimates.length === 0) return;
+
+    // Always keep Saved_Bills_Data.json updated in real time whenever any state array changes
+    syncAllDataToSavedBillsFile(dbClients, dbProducts, dbEstimates, dbStockLogs);
+
+    if (isForceOfflineActive) return;
+
     const userMatched = dbUsers.find(u => u.phone === currentUser);
-    if (!userMatched || !userMatched.password) return;
+    const effectivePassword = userMatched?.password || '1234';
 
     lastLocalMutationTimeRef.current = Date.now();
     isPendingPushRef.current = true;
@@ -1992,27 +2068,34 @@ export default function App() {
       try {
         const localEpoch = Number(safeStorage.getItem(`user_${currentUser}_last_synced_millis`)) || lastLocalMutationTimeRef.current || Date.now();
         const payload = {
-          password: userMatched.password,
+          password: effectivePassword,
           businessName: businessName,
           clients: dbClients,
           products: dbProducts,
           estimates: dbEstimates,
           last_synced_millis: localEpoch,
-          force: getDeletedEstimateIds(currentUser).size > 0
+          force: true
         };
 
+        // 1. Real-time push to Firebase Cloud Firestore
+        if (isFirebaseConfigured()) {
+          pushUserSyncToFirestore(currentUser, {
+            businessName,
+            clients: dbClients,
+            products: dbProducts,
+            estimates: dbEstimates,
+            stockLogs: dbStockLogs,
+            costFallbackPct,
+            last_synced_millis: localEpoch
+          }).catch(() => {});
+        }
+
+        // 2. Real-time push to Express Server (/api/sync/:phone)
         const response = await fetch(`/api/sync/${currentUser}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        
-        if (response.status === 409) {
-          console.warn("[Auto-Sync Conflict] Server has newer data. Pausing auto-sync.");
-          showToast("⚠️ Sync conflict: Server has newer data. Click manual Sync to resolve.");
-          setSyncConflictDetected(true);
-          return;
-        }
 
         if (response.ok) {
           const resData = await response.json();
@@ -2034,7 +2117,7 @@ export default function App() {
       } finally {
         isPendingPushRef.current = false;
       }
-    }, 1500);
+    }, 800);
 
     return () => clearTimeout(timer);
   }, [dbClients, dbProducts, dbEstimates, currentUser, businessName, dbUsers, isInitialPullDone, isForceOfflineActive]);
@@ -2043,10 +2126,7 @@ export default function App() {
   const handleSyncDataWithServer = async () => {
     if (!currentUser) return;
     const userMatched = dbUsers.find(u => u.phone === currentUser);
-    if (!userMatched || !userMatched.password) {
-      showToast("Sync Error: Profile is incomplete");
-      return;
-    }
+    const effectivePassword = userMatched?.password || '1234';
 
     isPendingPushRef.current = true;
 
@@ -2055,7 +2135,7 @@ export default function App() {
       
       const localEpoch = Number(safeStorage.getItem(`user_${currentUser}_last_synced_millis`)) || lastLocalMutationTimeRef.current || Date.now();
       const payload = {
-        password: userMatched.password,
+        password: effectivePassword,
         businessName: businessName,
         clients: dbClients,
         products: dbProducts,
@@ -2080,7 +2160,7 @@ export default function App() {
           variant: 'warning',
         });
         if (confirmDownload) {
-          const getResponse = await fetch(`/api/sync?phone=${encodeURIComponent(currentUser)}&password=${encodeURIComponent(userMatched.password)}`);
+          const getResponse = await fetch(`/api/sync?phone=${encodeURIComponent(currentUser)}&password=${encodeURIComponent(effectivePassword)}`);
           if (getResponse.ok) {
             const syncData = await getResponse.json();
             const clients = Array.isArray(syncData.clients) ? syncData.clients : [];
@@ -2611,6 +2691,14 @@ export default function App() {
 
     registerLocalMutation();
     triggerAutomaticCloudSave(dbClients, updated, dbEstimates, updatedLogs);
+    recordSystemAudit({
+      action: 'PRICE_CHANGED',
+      details: `Updated product "${updatedProd.name}" (Rate: ₹${updatedProd.price}, Stock: ${updatedProd.stock} ${updatedProd.unit}).`,
+      userId: currentUser || 'local',
+      userName: businessName,
+      userRole: currentUserRole,
+      userPhone: currentUser || undefined,
+    });
     showToast("Product updated successfully!");
   };
 
@@ -2995,11 +3083,19 @@ export default function App() {
 
     registerLocalMutation();
 
-    // Automatically save bill data into a dedicated file (Saved_Bills_Data.json)
+    // Automatically save all data (all bills, products, parties, stockLogs) into Saved_Bills_Data.json
     try {
+      syncAllDataToSavedBillsFile(
+        dbClients,
+        updatedProductsList,
+        updatedEstimates,
+        updatedLogs,
+        payload.serial
+      );
       const billFilePayload = {
         fileName: 'Saved_Bills_Data.json',
         businessName,
+        userPhone: currentUser || '',
         lastSavedBillSerial: payload.serial,
         updatedAt: new Date().toISOString(),
         clients: dbClients,
@@ -3007,28 +3103,6 @@ export default function App() {
         estimates: updatedEstimates,
         stockLogs: updatedLogs
       };
-      // Store lightweight bill & party records in localStorage to avoid exceeding 5MB quota
-      safeStorage.setItem('saved_bills_file_data', JSON.stringify({
-        fileName: 'Saved_Bills_Data.json',
-        businessName,
-        lastSavedBillSerial: payload.serial,
-        updatedAt: billFilePayload.updatedAt,
-        clients: dbClients,
-        estimates: updatedEstimates
-      }));
-
-      fetch('/api/save-bill-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bill: payload,
-          estimates: updatedEstimates,
-          clients: dbClients,
-          products: updatedProductsList,
-          stockLogs: updatedLogs,
-          businessName
-        })
-      }).catch(() => {});
 
       const currentAppSettings = getSavedAppSettings(currentUser || undefined);
       const shouldAutoDownload =
@@ -3050,6 +3124,14 @@ export default function App() {
 
     // Immediately update UI / open Print Dialog BEFORE awaiting network sync so F3 is instant
     setEditingEstimateId(null);
+    recordSystemAudit({
+      action: 'BILL_CREATED',
+      details: `Saved invoice ${payload.serial} for ${payload.clientName || 'Walk-in'} — Total ₹${payload.grandTotal} (${payload.status}).`,
+      userId: currentUser || 'local',
+      userName: businessName,
+      userRole: currentUserRole,
+      userPhone: currentUser || undefined,
+    });
     showToast(`Bill ${payload.serial} saved in Saved_Bills_Data.json!`);
 
     if (openPrint) {
@@ -3672,6 +3754,14 @@ export default function App() {
     setRenderKey(prev => prev + 1);
 
     const actionText = isReplace ? "Restored & Replaced" : "Merged";
+    recordSystemAudit({
+      action: 'RESTORE_DATA',
+      details: `Backup ${actionText}: ${finalEstimates.length} bills, ${finalProducts.length} products, ${finalClients.length} customers.`,
+      userId: currentUser || 'local',
+      userName: businessName,
+      userRole: currentUserRole,
+      userPhone: currentUser || undefined,
+    });
     showToast(`✓ Backup ${actionText}: ${finalEstimates.length} invoices, ${finalProducts.length} items, ${finalClients.length} parties`);
 
     // Force upload to cloud with force: true so server and firestore accept restored state
@@ -3737,37 +3827,46 @@ export default function App() {
     }
 
     return (
-      <div className="flex flex-col min-h-screen bg-slate-100 select-none no-print pb-20">
+      <div className="flex flex-col min-h-screen bg-[#e4ebf2] dark:bg-slate-950 select-none no-print pb-20">
         {/* Toast notifications */}
         {toastMessage && (
-          <div className="fixed top-4 left-4 right-4 bg-slate-900 text-white font-bold text-xs py-3 px-4 rounded-xl shadow-xl flex items-center space-x-2.5 z-50 animate-bounce">
-            <CheckCircle className="w-4 h-4 text-emerald-450" />
+          <div className="fixed top-4 left-4 right-4 bg-[#001e33] text-white font-bold text-xs py-3 px-4 rounded-xl shadow-xl border border-[#ffb821]/40 flex items-center space-x-2.5 z-50 animate-bounce">
+            <CheckCircle className="w-4 h-4 text-[#ffb821]" />
             <span className="flex-1">{toastMessage}</span>
           </div>
         )}
 
-        {/* Mobile Top Header */}
-        <header className="sticky top-0 bg-slate-950 text-white p-3.5 shadow-md flex items-center justify-between z-40 select-none border-b border-slate-900">
+        {/* Mobile Top Header - Tally Prime Style */}
+        <header className="sticky top-0 bg-[#002d4d] text-white p-3.5 shadow-md flex items-center justify-between z-40 select-none border-b-2 border-[#ffb821]">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center font-bold text-lg shadow-md shadow-blue-500/20">
-              📱
+            <div className="w-8 h-8 bg-[#001e33] border border-[#ffb821]/60 rounded-lg flex items-center justify-center font-extrabold text-sm text-[#ffb821] shadow-sm">
+              TB
             </div>
-            <div className="max-w-[130px] truncate">
-              <h1 className="font-black text-xs tracking-tight uppercase leading-none">{businessName}</h1>
-              <span className="text-[8px] font-bold text-blue-400 mt-1 block uppercase tracking-widest leading-none">
-                {currentUserRole === 'clerk' ? 'Staff Clerk' : 'Shop Owner'}
+            <div className="max-w-[140px] truncate">
+              <div className="font-extrabold text-xs tracking-tight text-[#ffb821] leading-none">myBillBook</div>
+              <span className="text-[9px] font-semibold text-white/75 mt-1 block truncate leading-none">
+                {businessName}
               </span>
             </div>
           </div>
 
           <div className="flex items-center space-x-1.5">
+            {/* Quick Command Palette / Global Search trigger */}
+            <button
+              onClick={() => setShowCommandPalette(true)}
+              className="p-2 rounded-lg cursor-pointer text-xs border bg-[#001e33] hover:bg-[#003a61] border-white/15 text-[#ffb821]"
+              title="Quick Search & Jump to Any Screen (Reports, Audit Logs, Bills)"
+            >
+              🔍
+            </button>
+
             {/* Quick Print Customizer trigger */}
             <button
               onClick={() => navigateToTab('print_customizer')}
-              className={`p-2 rounded-xl cursor-pointer text-xs border transition-all ${
+              className={`p-2 rounded-lg cursor-pointer text-xs border transition-all ${
                 currentTab === 'print_customizer'
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  ? 'bg-[#ffb821] border-[#ffb821] text-[#002d4d] font-bold'
+                  : 'bg-[#001e33] hover:bg-[#003a61] border-white/15 text-white/85'
               }`}
               title="Print Setup & Customizer"
             >
@@ -3777,10 +3876,10 @@ export default function App() {
             {/* Quick Settings trigger */}
             <button
               onClick={() => navigateToTab('settings')}
-              className={`p-2 rounded-xl cursor-pointer text-xs border transition-all ${
+              className={`p-2 rounded-lg cursor-pointer text-xs border transition-all ${
                 currentTab === 'settings'
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  ? 'bg-[#ffb821] border-[#ffb821] text-[#002d4d] font-bold'
+                  : 'bg-[#001e33] hover:bg-[#003a61] border-white/15 text-white/85'
               }`}
               title="Settings & Profile"
             >
@@ -3790,7 +3889,7 @@ export default function App() {
             {/* Quick Lock Counter */}
             <button
               onClick={() => setIsCounterLocked(true)}
-              className="p-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 rounded-xl cursor-pointer text-xs"
+              className="p-2 bg-[#001e33] hover:bg-[#003a61] border border-white/15 text-[#ffb821] rounded-lg cursor-pointer text-xs"
               title="Lock Counter Screen"
             >
               🔒
@@ -3800,20 +3899,20 @@ export default function App() {
             <button
               type="button"
               onClick={() => handleToggleDarkMode(!appSettings.darkMode)}
-              className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-xl cursor-pointer text-xs flex items-center justify-center transition-colors"
+              className="p-2 bg-[#001e33] hover:bg-[#003a61] border border-white/15 text-white rounded-lg cursor-pointer text-xs flex items-center justify-center transition-colors"
               title={appSettings.darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
             >
               {appSettings.darkMode ? (
-                <Sun className="w-4 h-4 text-amber-400" />
+                <Sun className="w-4 h-4 text-[#ffb821]" />
               ) : (
-                <Moon className="w-4 h-4 text-indigo-300" />
+                <Moon className="w-4 h-4 text-sky-200" />
               )}
             </button>
 
             {/* Quick Add File Data trigger */}
             <button
               onClick={() => setShowFileDataImportModal(true)}
-              className="p-2 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 rounded-xl cursor-pointer text-xs"
+              className="p-2 bg-[#059669] hover:bg-emerald-700 border border-emerald-400/30 text-white rounded-lg cursor-pointer text-xs"
               title="Add Data from Files (फ़ाइल डेटा जोड़ें)"
             >
               📂
@@ -3822,10 +3921,10 @@ export default function App() {
             {/* Quick Backup trigger */}
             <button
               onClick={() => navigateToTab('backup')}
-              className={`p-2 rounded-xl cursor-pointer text-xs border transition-all ${
+              className={`p-2 rounded-lg cursor-pointer text-xs border transition-all ${
                 currentTab === 'backup'
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  ? 'bg-[#ffb821] border-[#ffb821] text-[#002d4d] font-bold'
+                  : 'bg-[#001e33] hover:bg-[#003a61] border-white/15 text-white/85'
               }`}
               title="Data Backup"
             >
@@ -3835,7 +3934,7 @@ export default function App() {
             {/* Quick Sync trigger */}
             <button
               onClick={handleSyncDataWithServer}
-              className="p-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 rounded-xl cursor-pointer text-xs animate-pulse"
+              className="p-2 bg-[#001e33] hover:bg-[#003a61] border border-white/15 text-white rounded-lg cursor-pointer text-xs"
               title="Sync Data with Server"
             >
               🔄
@@ -3844,10 +3943,10 @@ export default function App() {
             {/* Force Offline Indicator */}
             <button
               onClick={() => handleToggleForceOffline(!isForceOfflineActive)}
-              className={`px-2.5 py-1.5 rounded-xl font-bold text-[8px] uppercase tracking-wider border cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg font-bold text-[8px] uppercase tracking-wider border cursor-pointer ${
                 isForceOfflineActive
-                  ? 'bg-amber-950/40 border-amber-900/60 text-amber-400'
-                  : 'bg-emerald-950/40 border-emerald-900/60 text-emerald-450'
+                  ? 'bg-amber-950/60 border-amber-500/50 text-[#ffb821]'
+                  : 'bg-[#059669] border-emerald-400/40 text-white'
               }`}
             >
               {isForceOfflineActive ? 'Offline' : 'Sync Live'}
@@ -3860,7 +3959,7 @@ export default function App() {
                 localStorage.setItem('layout_preference', 'pc');
                 showToast("Switched to Advanced PC Console! (💻)");
               }}
-              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[8px] font-black uppercase tracking-wider cursor-pointer font-sans"
+              className="px-2.5 py-1.5 bg-[#ffb821] hover:bg-amber-400 text-[#002d4d] rounded-lg text-[8px] font-black uppercase tracking-wider cursor-pointer font-sans"
               title="Switch to PC View"
             >
               💻 PC VIEW
@@ -3869,7 +3968,7 @@ export default function App() {
         </header>
 
         {/* Scrollable Container Content Body */}
-        <main className="flex-1 p-3.5 overflow-y-auto bg-slate-50">
+        <main className="flex-1 p-3.5 overflow-y-auto bg-[#e4ebf2] dark:bg-slate-950">
           
           {/* Sync Conflict Alert & Resolution Bar */}
           {syncConflictDetected && (
@@ -4195,6 +4294,26 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 8: Reports & CA GST Summary */}
+          {currentTab === 'reports' && (
+            <div className="space-y-4 animate-fade-in pb-16">
+              <ReportsAndGst
+                estimates={dbEstimates}
+                products={dbProducts}
+                clients={dbClients}
+                costFallbackPct={costFallbackPct}
+                formatCurrency={(val) => `₹${Math.round(val || 0).toLocaleString('en-IN')}`}
+              />
+            </div>
+          )}
+
+          {/* TAB 9: Security & Audit Logs */}
+          {currentTab === 'audit_logs' && (
+            <div className="space-y-4 animate-fade-in pb-16">
+              <AuditLogsView userPhone={currentUser || undefined} businessName={businessName} />
+            </div>
+          )}
+
         </main>
 
         {/* Dedicated sticky bottom navigation rail with large, touch-friendly targets */}
@@ -4508,8 +4627,37 @@ export default function App() {
           onClose={() => setShowFileDataImportModal(false)}
           onImportData={handleImportBackupRestore}
           currentUsers={dbUsers}
+          currentClients={dbClients}
+          currentProducts={dbProducts}
+          currentEstimates={dbEstimates}
+          currentStockLogs={dbStockLogs}
+          businessName={businessName}
         />
 
+        <CommandPalette
+          isOpen={showCommandPalette}
+          onClose={() => setShowCommandPalette(false)}
+          onNavigate={(tab) => {
+            if (tab === 'create') {
+              setEditingEstimateId(null);
+              navigateToTab('create_estimate');
+            } else if (tab === 'estimates') {
+              navigateToTab('dashboard');
+            } else if (tab === 'inventory') {
+              navigateToTab('products');
+            } else if (tab === 'print_setup') {
+              navigateToTab('print_customizer');
+            } else {
+              navigateToTab(tab as TabType);
+            }
+          }}
+          onSelectEstimate={(est) => openPrintInvoice(est)}
+          estimates={dbEstimates}
+          clients={dbClients}
+          products={dbProducts}
+          userRole={currentUserRole}
+          formatCurrency={(val) => `₹${Math.round(val || 0).toLocaleString('en-IN')}`}
+        />
         <ConfirmModalHost />
       </div>
     );
@@ -4519,7 +4667,7 @@ export default function App() {
   const currentLoggedUserEmail = currentLoggedUser?.email || getSavedPrintConfig(businessName, currentUser || undefined).email || '';
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen md:h-screen md:overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+    <div className="flex flex-col md:flex-row min-h-screen md:h-screen md:overflow-hidden bg-[#e4ebf2] dark:bg-slate-950 text-[#1e293b] dark:text-slate-100 transition-colors">
       <ConfirmModalHost />
       <KeyboardShortcutModal
         isOpen={showShortcutGuideModal}
@@ -4531,6 +4679,11 @@ export default function App() {
         onClose={() => setShowFileDataImportModal(false)}
         onImportData={handleImportBackupRestore}
         currentUsers={dbUsers}
+        currentClients={dbClients}
+        currentProducts={dbProducts}
+        currentEstimates={dbEstimates}
+        currentStockLogs={dbStockLogs}
+        businessName={businessName}
       />
       
       {/* ----------------- RETAIL COUNTER AUTO-LOCK OVERLAY ----------------- */}
@@ -4547,196 +4700,164 @@ export default function App() {
       
       {/* Toast notifications */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 bg-slate-900 text-white font-bold text-xs py-3 px-6 rounded-2xl shadow-xl border border-slate-750 flex items-center space-x-2.5 z-50 animate-bounce no-print">
-          <CheckCircle className="w-4 h-4 text-emerald-450" />
+        <div className="fixed top-5 right-5 bg-[#001e33] text-white font-bold text-xs py-3 px-6 rounded-lg shadow-xl border border-[#ffb821] flex items-center space-x-2.5 z-50 animate-bounce no-print">
+          <CheckCircle className="w-4 h-4 text-[#ffb821]" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* ----------------- SIDEBAR RAIL NAVIGATION ----------------- */}
-      <aside className={`no-print bg-slate-950 text-slate-200 w-full flex-shrink-0 transition-all duration-300 flex flex-col justify-between border-r border-slate-900 select-none md:h-screen md:sticky md:top-0 md:overflow-y-auto custom-scrollbar ${
-        isSidebarMinimized ? 'md:w-20 p-4' : 'md:w-64 p-6'
-      }`}>
-        
-        <div className="space-y-6">
-          <div className={`flex ${isSidebarMinimized ? 'flex-col items-center gap-4 pb-4' : 'items-center justify-between pb-4'} border-b border-slate-900`}>
-            {!isSidebarMinimized && (
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-md shadow-blue-500/20">
-                  📘
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5 leading-none">
-                    <div>
-                      <span className="text-red-500 font-black text-lg tracking-tight">my</span>
-                      <span className="text-white font-black text-lg tracking-tight">BillBook</span>
-                    </div>
-                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                      v5.1.0
-                    </span>
-                  </div>
-                  <span className="text-[9px] font-bold text-blue-400 mt-1 block uppercase tracking-wider">GST Billing & Accounting</span>
-                </div>
-              </div>
-            )}
-            {isSidebarMinimized && (
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-md shadow-blue-500/20">
-                📘
-              </div>
-            )}
-            
-            {/* Toggle Handle Button */}
-            <button
+      {/* ----------------- SIDEBAR - VARIATION 2 HITECH ENTERPRISE NAVIGATION ----------------- */}
+      <aside
+        className={`no-print bg-[#111827] text-[#94a3b8] w-full flex-shrink-0 transition-all duration-200 flex flex-col justify-between border-r border-[#1f2937] select-none md:h-screen md:sticky md:top-0 md:overflow-y-auto custom-scrollbar ${
+          isSidebarMinimized ? 'md:w-[76px]' : 'md:w-[260px]'
+        }`}
+      >
+        <div className="flex flex-col flex-1">
+          {/* Brand Section (height: 64px, background: #030712) */}
+          <div
+            className={`h-[64px] bg-[#030712] border-b border-[#1f2937] flex items-center shrink-0 ${
+              isSidebarMinimized ? 'justify-center px-2' : 'justify-between px-6'
+            }`}
+          >
+            <div
               onClick={() => setIsSidebarMinimized(!isSidebarMinimized)}
-              className={`p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer hidden md:block ${isSidebarMinimized ? 'mt-2' : ''}`}
-              title={isSidebarMinimized ? "Expand Sidebar" : "Collapse Sidebar"}
+              className="flex items-center gap-3 cursor-pointer"
+              title="BillSync Pro - Toggle Sidebar"
             >
-              {isSidebarMinimized ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-          </div>
-
-          {/* Connected Session Status card + Permanent Per-ID LAN IP */}
-          {!isSidebarMinimized && (
-            <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
-              <div
-                onClick={currentUserRole !== 'clerk' ? triggerOpenProfileModal : undefined}
-                className={`flex items-center space-x-3 transition-colors ${
-                  currentUserRole !== 'clerk' ? 'cursor-pointer hover:opacity-90' : ''
-                }`}
-              >
-                <div className="w-8 h-8 rounded-full bg-slate-800 text-blue-300 flex items-center justify-center text-xs border border-slate-700 shrink-0">
-                  {currentUserRole === 'clerk' ? '💼' : '👤'}
-                </div>
-                <div className="overflow-hidden">
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">
-                    {currentUserRole === 'clerk' ? 'Billing Staff Session' : 'Owner Session'}
-                  </p>
-                  <span className="text-xs font-black text-white block mt-1 font-mono tabular-nums truncate">+91 {currentUser}</span>
-                  {currentUserRole !== 'clerk' && (
-                    <span className="text-[8px] text-blue-400 font-bold hover:underline block mt-0.5 uppercase tracking-wide">Edit details</span>
-                  )}
-                </div>
+              <div className="w-8 h-8 bg-[#2563eb] rounded-[6px] flex items-center justify-center text-white font-black text-base shrink-0">
+                B
               </div>
-
-              {/* Single Permanent Non-Changing LAN IP for this User ID */}
-              {currentUser && (
-                <div className="pt-2 border-t border-slate-800/90 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="text-[9px] text-slate-400 font-semibold block">Permanent ID LAN IP</span>
-                    <span className="text-[11px] font-mono font-bold text-emerald-400 tabular-nums block truncate">
-                      {getPermanentIpForUser(currentUser).ipWithPort}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const perm = getPermanentIpForUser(currentUser);
-                      navigator.clipboard?.writeText(perm.autoLoginUrl);
-                      showToast(`✓ Copied Permanent 2nd-PC Auto-Login Link (${perm.ipWithPort})`);
-                    }}
-                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-200 border border-slate-700 cursor-pointer shrink-0"
-                    title="Copy Permanent 2nd-PC Auto-Login Link for this User ID"
-                  >
-                    Copy IP
-                  </button>
-                </div>
+              {!isSidebarMinimized && (
+                <span
+                  className="text-white font-extrabold text-[1.1rem] tracking-[-0.02em] whitespace-nowrap"
+                  style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                >
+                  BillSync Pro
+                </span>
               )}
             </div>
-          )}
 
-          {/* Navigation rail buttons */}
-          <nav className={`space-y-1.5 text-xs ${isSidebarMinimized ? 'flex flex-col items-center' : ''}`}>
-            
+            {!isSidebarMinimized && (
+              <button
+                type="button"
+                onClick={() => setIsSidebarMinimized(true)}
+                className="p-1.5 rounded-md hover:bg-[#1f2937] text-[#94a3b8] hover:text-white transition-colors cursor-pointer hidden md:flex items-center justify-center"
+                title="Collapse Sidebar"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Variation 2 Technical Systematic Navigation */}
+          <nav className={`flex-1 ${isSidebarMinimized ? 'p-2.5 space-y-1.5' : 'p-[20px_12px] space-y-1'}`}>
             {currentUserRole !== 'clerk' && (
               <button
                 onClick={() => { setEditingEstimateId(null); navigateToTab('dashboard'); }}
-                className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                  isSidebarMinimized 
-                    ? 'justify-center p-3 w-12 h-12 text-center' 
-                    : 'w-full space-x-3 px-4 py-3'
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
                 } ${
-                  currentTab === 'dashboard' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                  currentTab === 'dashboard'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
                 }`}
-                title="Dashboard & Reports"
+                title="Dashboard"
               >
-                <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+                <span className="w-[18px] text-center opacity-90 shrink-0">📊</span>
                 {!isSidebarMinimized && <span>Dashboard</span>}
               </button>
             )}
 
             <button
               onClick={() => { setEditingEstimateId(null); navigateToTab('create_estimate'); }}
-              className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
+              className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               } ${
-                currentTab === 'create_estimate' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                currentTab === 'create_estimate'
+                  ? 'bg-[#2563eb] text-white font-semibold'
+                  : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
               }`}
-              title="Sales & Invoices"
+              title="Sales Invoice (F2)"
             >
-              <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
-              {!isSidebarMinimized && <span>Sales / Invoices</span>}
+              <span className="w-[18px] text-center opacity-90 shrink-0">🧾</span>
+              {!isSidebarMinimized && <span>Sales Invoice</span>}
             </button>
 
             <button
               onClick={() => { setEditingEstimateId(null); navigateToTab('products'); }}
-              className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
+              className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               } ${
-                currentTab === 'products' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                currentTab === 'products'
+                  ? 'bg-[#2563eb] text-white font-semibold'
+                  : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
               }`}
-              title="Items & Inventory"
+              title="Inventory"
             >
-              <Layers className="w-4 h-4 flex-shrink-0" />
-              {!isSidebarMinimized && <span>Items & Inventory</span>}
+              <span className="w-[18px] text-center opacity-90 shrink-0">📦</span>
+              {!isSidebarMinimized && <span>Inventory</span>}
             </button>
 
             <button
               onClick={() => { setEditingEstimateId(null); navigateToTab('clients'); }}
-              className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
+              className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               } ${
-                currentTab === 'clients' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                currentTab === 'clients'
+                  ? 'bg-[#2563eb] text-white font-semibold'
+                  : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
               }`}
-              title="Parties & Customers"
+              title="Customers"
             >
-              <Users className="w-4 h-4 flex-shrink-0" />
-              {!isSidebarMinimized && <span>Parties & Customers</span>}
+              <span className="w-[18px] text-center opacity-90 shrink-0">👥</span>
+              {!isSidebarMinimized && <span>Customers</span>}
             </button>
 
             <button
               onClick={() => { setEditingEstimateId(null); navigateToTab('statements'); }}
-              className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
+              className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               } ${
-                currentTab === 'statements' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                currentTab === 'statements'
+                  ? 'bg-[#2563eb] text-white font-semibold'
+                  : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
               }`}
-              title="Party Ledgers & Passbook"
+              title="Ledgers"
             >
-              <Landmark className="w-4 h-4 flex-shrink-0" />
-              {!isSidebarMinimized && <span>Ledgers & Passbook</span>}
+              <span className="w-[18px] text-center opacity-90 shrink-0">🏛️</span>
+              {!isSidebarMinimized && <span>Ledgers</span>}
             </button>
 
             {currentUserRole !== 'clerk' && (
               <button
-                onClick={() => { setEditingEstimateId(null); navigateToTab('print_customizer'); }}
-                className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                  isSidebarMinimized 
-                    ? 'justify-center p-3 w-12 h-12 text-center' 
-                    : 'w-full space-x-3 px-4 py-3'
+                onClick={() => { setEditingEstimateId(null); navigateToTab('reports'); }}
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
                 } ${
-                  currentTab === 'print_customizer' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                  currentTab === 'reports'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
                 }`}
-                title="Invoice Print Customizer"
+                title="Reports"
               >
-                <Printer className="w-4 h-4 flex-shrink-0" />
+                <span className="w-[18px] text-center opacity-90 shrink-0">📈</span>
+                {!isSidebarMinimized && <span>Reports</span>}
+              </button>
+            )}
+
+            {currentUserRole !== 'clerk' && (
+              <button
+                onClick={() => { setEditingEstimateId(null); navigateToTab('print_customizer'); }}
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
+                } ${
+                  currentTab === 'print_customizer'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
+                }`}
+                title="Print Setup & Themes"
+              >
+                <span className="w-[18px] text-center opacity-90 shrink-0">🖨️</span>
                 {!isSidebarMinimized && <span>Print Setup</span>}
               </button>
             )}
@@ -4744,147 +4865,203 @@ export default function App() {
             {currentUserRole !== 'clerk' && (
               <button
                 onClick={() => { setEditingEstimateId(null); navigateToTab('backup'); }}
-                className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                  isSidebarMinimized 
-                    ? 'justify-center p-3 w-12 h-12 text-center' 
-                    : 'w-full space-x-3 px-4 py-3'
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
                 } ${
-                  currentTab === 'backup' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                  currentTab === 'backup'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
                 }`}
-                title="Cloud Backup & Sync"
+                title="Backup & Restore"
               >
-                <Database className="w-4 h-4 flex-shrink-0" />
-                {!isSidebarMinimized && <span>Backup & Sync</span>}
+                <span className="w-[18px] text-center opacity-90 shrink-0">🗄️</span>
+                {!isSidebarMinimized && <span>Backup &amp; Sync</span>}
+              </button>
+            )}
+
+            {currentUserRole !== 'clerk' && (
+              <button
+                onClick={() => { setEditingEstimateId(null); navigateToTab('audit_logs'); }}
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
+                } ${
+                  currentTab === 'audit_logs'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
+                }`}
+                title="Audit Logs"
+              >
+                <span className="w-[18px] text-center opacity-90 shrink-0">🛡️</span>
+                {!isSidebarMinimized && <span>Audit Logs</span>}
               </button>
             )}
 
             {currentUserRole !== 'clerk' && (
               <button
                 onClick={() => { setEditingEstimateId(null); navigateToTab('settings'); }}
-                className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white transition-all text-left cursor-pointer ${
-                  isSidebarMinimized 
-                    ? 'justify-center p-3 w-12 h-12 text-center' 
-                    : 'w-full space-x-3 px-4 py-3'
+                className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium transition-all cursor-pointer ${
+                  isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
                 } ${
-                  currentTab === 'settings' ? 'bg-blue-600 text-white hover:bg-blue-600 shadow-xs' : 'text-slate-400'
+                  currentTab === 'settings'
+                    ? 'bg-[#2563eb] text-white font-semibold'
+                    : 'text-[#94a3b8] hover:bg-[#1f2937] hover:text-white'
                 }`}
-                title="Settings & Business Profile"
+                title="Settings"
               >
-                <SettingsIcon className="w-4 h-4 flex-shrink-0" />
+                <span className="w-[18px] text-center opacity-90 shrink-0">⚙️</span>
                 {!isSidebarMinimized && <span>Settings</span>}
               </button>
             )}
 
             <button
               onClick={() => setShowFileDataImportModal(true)}
-              className={`flex items-center rounded-xl font-bold hover:bg-emerald-950/50 hover:text-emerald-300 text-emerald-400 transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
+              className={`w-full flex items-center gap-3 rounded-[8px] text-[0.85rem] font-medium text-[#fbbf24] hover:bg-[#1f2937] transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               }`}
-              title="Add Data from Project or Local Files (फ़ाइल डेटा जोड़ें)"
+              title="Add File Data"
             >
-              <FolderOpen className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+              <span className="w-[18px] text-center shrink-0">📂</span>
               {!isSidebarMinimized && <span>Add File Data</span>}
             </button>
 
             <button
               onClick={() => setShowShortcutGuideModal(true)}
-              className={`flex items-center rounded-xl font-bold hover:bg-slate-900 hover:text-white text-slate-400 transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full justify-between px-4 py-3'
+              className={`w-full flex items-center justify-between rounded-[8px] text-[0.85rem] font-medium text-[#94a3b8] hover:bg-[#1f2937] hover:text-white transition-all cursor-pointer ${
+                isSidebarMinimized ? 'justify-center py-2.5 px-2' : 'px-4 py-2.5'
               }`}
-              title="Keyboard Shortcut Guide (Press F1)"
+              title="Keyboard Shortcut Guide (F1)"
             >
-              <div className="flex items-center space-x-3">
-                <Keyboard className="w-4 h-4 flex-shrink-0 text-blue-400" />
-                {!isSidebarMinimized && <span>Shortcut Guide</span>}
+              <div className="flex items-center gap-3">
+                <span className="w-[18px] text-center opacity-90 shrink-0">⌨️</span>
+                {!isSidebarMinimized && <span>Shortcuts</span>}
               </div>
               {!isSidebarMinimized && (
-                <span className="px-1.5 py-0.5 text-[9px] font-mono font-black bg-slate-800 text-blue-300 border border-slate-700 rounded">
+                <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-[#030712] text-[#fbbf24] border border-[#1f2937] rounded">
                   F1
                 </span>
               )}
             </button>
-
-            <button
-              onClick={() => setIsCounterLocked(true)}
-              className={`flex items-center rounded-xl font-bold hover:bg-amber-950/40 hover:text-amber-300 text-amber-400/80 transition-all text-left cursor-pointer ${
-                isSidebarMinimized 
-                  ? 'justify-center p-3 w-12 h-12 text-center' 
-                  : 'w-full space-x-3 px-4 py-3'
-              }`}
-              title="Lock Counter Now (Retail Protection)"
-            >
-              <Lock className="w-4 h-4 flex-shrink-0" />
-              {!isSidebarMinimized && <span>Lock Counter</span>}
-            </button>
-
           </nav>
         </div>
 
-        {/* Trade logo details */}
-        <div className={`pt-6 border-t border-slate-900 ${isSidebarMinimized ? 'flex flex-col items-center' : 'space-y-4'}`}>
-          {!isSidebarMinimized && (
-            <div>
-              <h4 className="text-[9px] font-black tracking-wider text-slate-500 uppercase">Active Business Counter</h4>
-              <span className="font-extrabold text-sm mt-1 text-white block max-w-[185px] truncate" title={businessName}>
-                {businessName}
-              </span>
+        {/* Variation 2 Bottom Status Footer + Lock/Logout */}
+        <div className={`border-t border-[#1f2937] ${isSidebarMinimized ? 'p-2.5 text-center' : 'p-5'} space-y-3`}>
+          <div>
+            <div className="v2-status-badge !bg-[#16a34a] !text-white inline-block mb-1.5">
+              {isSidebarMinimized ? 'ON' : 'Online / Local'}
             </div>
-          )}
+            {!isSidebarMinimized && (
+              <p className="text-[0.7rem] text-[#64748b] font-medium">
+                v5.1.0 Enterprise Edition
+              </p>
+            )}
+          </div>
 
-          <button
-            onClick={handleLogout}
-            className={`bg-red-950/40 hover:bg-red-900/30 border border-red-950/75 text-red-400 font-bold transition-all flex items-center justify-center cursor-pointer ${
-              isSidebarMinimized ? 'p-3 rounded-xl w-12 h-12' : 'w-full py-2.5 rounded-xl text-xs space-x-1'
-            }`}
-            title="Sign Out"
-          >
-            <LogOut className="w-4 h-4 flex-shrink-0" />
-            {!isSidebarMinimized && <span>Sign Out</span>}
-          </button>
+          <div className={`flex items-center gap-1.5 ${isSidebarMinimized ? 'flex-col' : ''}`}>
+            <button
+              onClick={() => setIsCounterLocked(true)}
+              className="flex-1 py-1.5 px-2.5 rounded-[6px] bg-[#1f2937] hover:bg-slate-700 text-amber-300 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              title="Lock Counter"
+            >
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              {!isSidebarMinimized && <span>Lock</span>}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex-1 py-1.5 px-2.5 rounded-[6px] bg-[#1f2937] hover:bg-rose-900/60 text-rose-300 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5 shrink-0" />
+              {!isSidebarMinimized && <span>Logout</span>}
+            </button>
+          </div>
         </div>
-
       </aside>
 
-      {/* ----------------- CONTAINER MAIN CORE FRAME ----------------- */}
-      <main className="flex-1 p-5 md:p-7 md:h-screen overflow-y-auto custom-scrollbar no-print bg-slate-50/70 dark:bg-slate-950">
-        {/* Modernized Workspace Top Bar */}
-        <div className="mb-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl px-4 py-3.5 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3.5 no-print select-none">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-base shadow-xs shrink-0">
-              {currentTab === 'dashboard' ? '📊' :
-               currentTab === 'create_estimate' ? '🧾' :
-               currentTab === 'products' ? '📦' :
-               currentTab === 'clients' ? '👥' :
-               currentTab === 'statements' ? '🏦' :
-               currentTab === 'print_customizer' ? '🖨️' :
-               currentTab === 'settings' ? '⚙️' : '💾'}
+      {/* ----------------- VARIATION 2 MAIN WORKSPACE ----------------- */}
+      <main className="flex-1 flex flex-col md:h-screen overflow-y-auto custom-scrollbar no-print bg-[#f0f2f5] dark:bg-slate-950">
+        {/* Variation 2 Header (height: 64px, white, 1px border-bottom #d1d5db) */}
+        <header className="min-h-[64px] bg-white dark:bg-slate-900 border-b border-[#d1d5db] dark:border-slate-800 px-5 md:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4 shrink-0 select-none">
+          {/* Left: View Title Group + Status Badge */}
+          <div className="flex flex-wrap items-center gap-4">
+            <h1 className="text-[1.25rem] font-bold tracking-[-0.01em] text-[#1e293b] dark:text-white">
+              {currentTab === 'create_estimate'
+                ? 'New Sales Invoice'
+                : currentTab === 'dashboard'
+                ? 'Business Dashboard'
+                : currentTab === 'products'
+                ? 'Inventory & Stock'
+                : currentTab === 'clients'
+                ? 'Customers & Parties'
+                : currentTab === 'statements'
+                ? 'Party Ledgers'
+                : currentTab === 'reports'
+                ? 'Reports & GST'
+                : currentTab === 'audit_logs'
+                ? 'Audit Logs'
+                : currentTab === 'print_customizer'
+                ? 'Print Setup & Themes'
+                : currentTab === 'settings'
+                ? 'Business Settings'
+                : currentTab === 'backup'
+                ? 'Backup & Restore'
+                : 'BillSync Pro'}
+            </h1>
+
+            <div className="v2-status-badge">
+              {currentTab === 'create_estimate' ? 'Sales Billing' : businessName}
             </div>
-            <div>
-              <h2 className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug">
-                {currentTab === 'dashboard' ? 'Business Dashboard & Analytics' :
-                 currentTab === 'create_estimate' ? 'POS Billing & Invoice Counter' :
-                 currentTab === 'products' ? 'Inventory & Stock Register' :
-                 currentTab === 'clients' ? 'Parties & Customer Directory' :
-                 currentTab === 'statements' ? 'Party Ledgers & Khata Passbook' :
-                 currentTab === 'print_customizer' ? 'Invoice Customizer & Print Setup' :
-                 currentTab === 'settings' ? 'System Settings & Preferences' :
-                 currentTab === 'backup' ? 'Cloud Backup & Multi-Device Sync' : 'myBillBook Pro'}
-              </h2>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{businessName}</span>
-                <span aria-hidden="true">·</span>
-                <span className="font-mono">+91 {currentUser}</span>
-              </div>
-            </div>
+
+            {currentUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  const perm = getPermanentIpForUser(currentUser);
+                  navigator.clipboard?.writeText(perm.autoLoginUrl);
+                  showToast(`✓ Copied Permanent 2nd-PC Auto-Login Link (${perm.ipWithPort})`);
+                }}
+                className="v2-status-badge !bg-[#eff6ff] !text-[#2563eb] cursor-pointer hover:opacity-90 font-mono"
+                title="Click to copy Permanent 2nd-PC Auto-Login URL"
+              >
+                +91 {currentUser} • IP: {getPermanentIpForUser(currentUser).ipWithPort}
+              </button>
+            )}
           </div>
-          
-          {/* Top Actions: Caps Lock Mode Indicator, Dark/Light Mode, Cloud Sync Status */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Live Typing Mode / Caps Lock Status Indicator */}
+
+          {/* Right: Variation 2 Header Buttons (Search ⌘K, Backup, + New Bill / Save & Print) */}
+          <div className="flex flex-wrap items-center gap-3">
+            <PWAInstallBar onOpenBackup={() => navigateToTab('backup')} />
+
+            <button
+              type="button"
+              onClick={() => setShowCommandPalette(true)}
+              className="v2-btn v2-btn-secondary !py-2 !px-3.5 !text-xs"
+              title="Open Quick Search & Command Palette (Ctrl / ⌘ + K)"
+            >
+              <span>Search ⌘K</span>
+            </button>
+
+            {currentUserRole !== 'clerk' && (
+              <button
+                type="button"
+                onClick={() => navigateToTab('backup')}
+                className="v2-btn v2-btn-secondary !py-2 !px-3.5 !text-xs"
+              >
+                <span>Backup</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setEditingEstimateId(null);
+                navigateToTab('create_estimate');
+              }}
+              className="v2-btn v2-btn-primary !w-auto !py-2 !px-4 !text-xs"
+            >
+              <span>+ New Bill (F2)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -4896,57 +5073,34 @@ export default function App() {
                     : '🔤 Title Case Mode: First Letter Capital + Rest Small'
                 );
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`px-2.5 py-2 rounded-[6px] text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap ${
                 capsLockOn
-                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  ? 'bg-[#fefce8] text-[#ca8a04] border-[#fde047]'
+                  : 'bg-white hover:bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#d1d5db] dark:border-slate-700'
               }`}
-              title="Press Caps Lock on keyboard (or click here) to switch between ALL CAPS and Title Case (First letter Capital, rest small)"
+              title="Toggle ALL CAPS vs Title Case"
             >
-              <span className="font-mono font-black text-[10px] px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900 text-slate-900 dark:text-white">
-                {capsLockOn ? 'CAPS ON' : 'Aa'}
+              <span className="font-mono font-bold text-[10px]">
+                {capsLockOn ? 'CAPS' : 'Aa'}
               </span>
-              <span>{capsLockOn ? 'ALL CAPS ACTIVE' : 'Auto Title Case'}</span>
             </button>
 
-            {/* Dark Mode toggle */}
             <button
               type="button"
               onClick={() => handleToggleDarkMode(!appSettings.darkMode)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              title={appSettings.darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              className="p-2 bg-white hover:bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-[#d1d5db] dark:border-slate-700 rounded-[6px] transition-colors cursor-pointer"
+              title={appSettings.darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
-              {appSettings.darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
-              <span>{appSettings.darkMode ? "Light" : "Dark"}</span>
+              {appSettings.darkMode ? (
+                <Sun className="w-4 h-4 text-[#fbbf24]" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-600" />
+              )}
             </button>
-
-            {/* Subtle Cloud Auto-Save Indicator */}
-            {autoSaveStatus === 'synced' && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-full text-[11px] font-bold shadow-xs animate-fade-in">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>Cloud Synced / Auto-Saved</span>
-              </div>
-            )}
-            {autoSaveStatus === 'saving' && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200/60 rounded-full text-[11px] font-bold shadow-xs animate-pulse">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                <span>Auto-Saving...</span>
-              </div>
-            )}
-            {autoSaveStatus === 'offline' && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200/60 rounded-full text-[11px] font-bold shadow-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                <span>Saved Offline (Pending Sync)</span>
-              </div>
-            )}
-            {autoSaveStatus === 'error' && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200/60 rounded-full text-[11px] font-bold shadow-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                <span>Auto-Save Failed</span>
-              </div>
-            )}
           </div>
-        </div>
+        </header>
+
+        <div className="flex-1 p-5 md:p-6">
 
         {/* Sync Conflict Alert & Resolution Bar */}
         {syncConflictDetected && (
@@ -5181,7 +5335,50 @@ export default function App() {
           />
         )}
 
+        {currentTab === 'reports' && (
+          <ReportsAndGst
+            estimates={dbEstimates}
+            products={dbProducts}
+            clients={dbClients}
+            costFallbackPct={costFallbackPct}
+            formatCurrency={(val) => `₹${Math.round(val || 0).toLocaleString('en-IN')}`}
+          />
+        )}
+
+        {currentTab === 'audit_logs' && (
+          <AuditLogsView
+            userPhone={currentUser || undefined}
+            businessName={businessName}
+          />
+        )}
+        </div>
       </main>
+
+      {/* GLOBAL COMMAND PALETTE (Ctrl / Cmd + K) */}
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onNavigate={(tab) => {
+          if (tab === 'create') {
+            setEditingEstimateId(null);
+            navigateToTab('create_estimate');
+          } else if (tab === 'estimates') {
+            navigateToTab('dashboard');
+          } else if (tab === 'inventory') {
+            navigateToTab('products');
+          } else if (tab === 'print_setup') {
+            navigateToTab('print_customizer');
+          } else {
+            navigateToTab(tab as TabType);
+          }
+        }}
+        onSelectEstimate={(est) => openPrintInvoice(est)}
+        estimates={dbEstimates}
+        clients={dbClients}
+        products={dbProducts}
+        userRole={currentUserRole}
+        formatCurrency={(val) => `₹${Math.round(val || 0).toLocaleString('en-IN')}`}
+      />
 
       {/* ----------------- MODAL: PROFILE & PASSWORD EDIT SETTINGS ----------------- */}
       {showProfileModal && (

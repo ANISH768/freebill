@@ -65,12 +65,29 @@ export default function PrintCustomizer({
   );
 
   const [activeTab, setActiveTab] = useState<'themes' | 'shop' | 'columns' | 'bank' | 'terms'>('themes');
+  const [themeCategoryFilter, setThemeCategoryFilter] = useState<'all' | 'tally' | 'gst' | 'non_gst'>('all');
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | 'sample'>('sample');
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [saveToast, setSaveToast] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
-  // Realistic sample bill data for testing setup
+  const GST_STYLES: SecondaryPrintStyle[] = ['tally_prime_gst', 'tally_erp9_gst', 'classic_gst', 'modern', 'stylish'];
+  const NON_GST_STYLES: SecondaryPrintStyle[] = ['tally_prime_non_gst', 'tally_simple_estimate', 'estimate', 'minimal', 'wholesale'];
+
+  const [invoiceTypeMode, setInvoiceTypeMode] = useState<'gst' | 'non_gst'>(() => {
+    const cur = config.secondaryStyle || 'modern';
+    return GST_STYLES.includes(cur) ? 'gst' : 'non_gst';
+  });
+  const [lastGstStyle, setLastGstStyle] = useState<SecondaryPrintStyle>(() => {
+    const cur = config.secondaryStyle || 'tally_prime_gst';
+    return GST_STYLES.includes(cur) ? cur : 'tally_prime_gst';
+  });
+  const [lastNonGstStyle, setLastNonGstStyle] = useState<SecondaryPrintStyle>(() => {
+    const cur = config.secondaryStyle || 'tally_prime_non_gst';
+    return NON_GST_STYLES.includes(cur) ? cur : 'tally_prime_non_gst';
+  });
+
+  // Realistic sample bill data for testing setup (dynamically reflects GST vs Non-GST selection)
   const sampleEstimate: Estimate = {
     id: 999999,
     serial: 'INV-2026-001',
@@ -84,13 +101,13 @@ export default function PrintCustomizer({
     deliveryNote: 'Direct Store Handover / Courier Dispatch',
     terms: '1. Goods once sold will not be taken back or exchanged.\n2. Warranty claims are directly handled by authorized manufacturer service centers.\n3. All disputes subject to local jurisdiction only.',
     subtotal: 4850,
-    taxPct: 5,
-    taxAmt: 242.5,
+    taxPct: invoiceTypeMode === 'gst' ? 5 : 0,
+    taxAmt: invoiceTypeMode === 'gst' ? 242.5 : 0,
     cashDiscount: 100,
     flatFinalDiscount: 0,
-    grandTotal: 4992.5,
+    grandTotal: invoiceTypeMode === 'gst' ? 4992.5 : 4750,
     paidAmount: 4000,
-    balanceDue: 992.5,
+    balanceDue: invoiceTypeMode === 'gst' ? 992.5 : 750,
     status: 'PARTIAL',
     items: [
       {
@@ -130,14 +147,15 @@ export default function PrintCustomizer({
     splitCash: 2500,
     splitUpi: 1500,
     splitBank: 0,
-    splitCredit: 992.5,
+    splitCredit: invoiceTypeMode === 'gst' ? 992.5 : 750,
     splitPayments: {
       cash: 2500,
       upi: 1500,
       bank: 0,
-      credit: 992.5
+      credit: invoiceTypeMode === 'gst' ? 992.5 : 750
     },
-    includePaymentQR: false
+    includePaymentQR: false,
+    isGstInvoice: invoiceTypeMode === 'gst'
   };
 
   const previewEstimate = selectedEstimateId === 'sample'
@@ -149,6 +167,9 @@ export default function PrintCustomizer({
     const handleConfigSync = () => {
       const updated = getSavedPrintConfig(businessName, currentUser || undefined);
       setConfig(updated);
+      if (updated.secondaryStyle) {
+        setInvoiceTypeMode(GST_STYLES.includes(updated.secondaryStyle) ? 'gst' : 'non_gst');
+      }
     };
     window.addEventListener('pos_print_config_updated', handleConfigSync);
     return () => window.removeEventListener('pos_print_config_updated', handleConfigSync);
@@ -157,10 +178,47 @@ export default function PrintCustomizer({
   // Handle configuration updates and auto-save
   const handleUpdateConfig = (newConfig: PrintTemplateConfig) => {
     setConfig(newConfig);
+    if (newConfig.secondaryStyle) {
+      if (GST_STYLES.includes(newConfig.secondaryStyle)) {
+        setInvoiceTypeMode('gst');
+        setLastGstStyle(newConfig.secondaryStyle);
+      } else if (NON_GST_STYLES.includes(newConfig.secondaryStyle)) {
+        setInvoiceTypeMode('non_gst');
+        setLastNonGstStyle(newConfig.secondaryStyle);
+      }
+    }
     savePrintConfig(newConfig, currentUser || undefined);
     window.dispatchEvent(new CustomEvent('pos_print_config_updated', { detail: newConfig }));
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2000);
+  };
+
+  // Instant GST vs Non-GST Radio/Tab Switcher: updates active template and filters themes
+  const handleSwitchCustomizerInvoiceType = (mode: 'gst' | 'non_gst') => {
+    setInvoiceTypeMode(mode);
+    setThemeCategoryFilter(mode);
+    const curStyle = config.secondaryStyle || 'tally_prime_gst';
+    let nextStyle = curStyle;
+    let nextTitle = config.billTitle;
+
+    if (mode === 'gst') {
+      if (!GST_STYLES.includes(curStyle)) {
+        nextStyle = lastGstStyle || 'tally_prime_gst';
+      }
+      nextTitle = 'TAX INVOICE';
+    } else {
+      if (!NON_GST_STYLES.includes(curStyle)) {
+        nextStyle = lastNonGstStyle || 'tally_prime_non_gst';
+      }
+      nextTitle = nextStyle === 'tally_prime_non_gst' || nextStyle === 'minimal' ? 'BILL OF SUPPLY' : 'ESTIMATE';
+    }
+
+    handleUpdateConfig({
+      ...config,
+      secondaryStyle: nextStyle,
+      billTitle: nextTitle,
+      layout: config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58' ? 'A4' : config.layout,
+    });
   };
 
   const handleLayoutChange = (newLayout: 'A4' | 'A5' | 'THERMAL_80' | 'THERMAL_58') => {
@@ -410,6 +468,52 @@ export default function PrintCustomizer({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap self-stretch lg:self-auto justify-between lg:justify-end">
+          {/* GST vs Non-GST Radio / Tab Selection Buttons in Top Header */}
+          <div
+            role="radiogroup"
+            aria-label="Invoice Type Selection"
+            className="flex items-center bg-[#e4ebf2] p-1 rounded-xl border border-[#003a61]/25 text-xs font-extrabold"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={invoiceTypeMode === 'gst'}
+              onClick={() => handleSwitchCustomizerInvoiceType('gst')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                invoiceTypeMode === 'gst'
+                  ? 'bg-[#002d4d] text-[#ffb821] shadow-xs font-black'
+                  : 'text-slate-700 hover:text-[#002d4d]'
+              }`}
+              title="Switch to GST Invoice Template & filter GST themes"
+            >
+              <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                invoiceTypeMode === 'gst' ? 'border-[#ffb821]' : 'border-slate-500'
+              }`}>
+                {invoiceTypeMode === 'gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+              </span>
+              <span>GST</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={invoiceTypeMode === 'non_gst'}
+              onClick={() => handleSwitchCustomizerInvoiceType('non_gst')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                invoiceTypeMode === 'non_gst'
+                  ? 'bg-[#002d4d] text-[#ffb821] shadow-xs font-black'
+                  : 'text-slate-700 hover:text-[#002d4d]'
+              }`}
+              title="Switch to Non-GST Bill of Supply / Estimate Template & filter Non-GST themes"
+            >
+              <span className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center ${
+                invoiceTypeMode === 'non_gst' ? 'border-[#ffb821]' : 'border-slate-500'
+              }`}>
+                {invoiceTypeMode === 'non_gst' && <span className="w-1.5 h-1.5 rounded-full bg-[#ffb821]" />}
+              </span>
+              <span>Non-GST</span>
+            </button>
+          </div>
+
           {/* Bill Preview Selector */}
           <div className="flex items-center space-x-1.5">
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Preview:</span>
@@ -506,55 +610,360 @@ export default function PrintCustomizer({
               
               {/* TAB 1: THEMES & COLORS */}
               {activeTab === 'themes' && (
-                <div className="space-y-4 animate-fade-in text-xs">
-                  {/* Theme Presets */}
-                  <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-2">
-                      1. Select Invoice Theme
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {[
-                        { id: 'estimate', name: 'Estimate', desc: 'Classic bordered A5/A4 paginated Estimate sheet (20 rows/page) with MRP, Rate & Disc%' },
-                        { id: 'modern', name: 'Modern BillBook', desc: 'Colored header & clean rounded cards (MyBillBook Signature)' },
-                        { id: 'classic_gst', name: 'Classic GST Tax Invoice', desc: 'Formal Indian GST grid, HSN table, state codes & tax breakdown' },
-                        { id: 'minimal', name: 'Minimalist Clean', desc: 'Monochrome corporate aesthetic, hairline dividers & pure focus on items' },
-                        { id: 'wholesale', name: 'Compact Retail', desc: 'Space-saving layout, maximum items per sheet' },
-                        { id: 'stylish', name: 'Stylish Premium', desc: 'Vibrant header banner, rounded badges, QR pay highlight & modern cards' },
-                        { id: 'thermal', name: 'Thermal POS Roll', desc: 'Optimized for 80mm & 58mm receipt printers' },
-                      ].map(themeItem => {
-                        const isSelected = themeItem.id === 'thermal' 
-                          ? (config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58')
-                          : (config.secondaryStyle === themeItem.id && config.layout !== 'THERMAL_80' && config.layout !== 'THERMAL_58');
+                <div className="space-y-5 animate-fade-in text-xs">
+                  {/* INVOICE THEMES GALLERY */}
+                  <div className="space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="block text-[11px] font-extrabold uppercase tracking-tight text-[#003a61]">
+                          1. Invoice Themes Gallery
+                        </label>
+                        <p className="text-[10px] text-slate-500">
+                          Click GST / Non-GST or any theme card below to update the template immediately
+                        </p>
+                      </div>
 
-                        return (
-                          <div
-                            key={themeItem.id}
+                      {/* Segmented Filter & Auto-Switch Control */}
+                      <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                        {[
+                          { id: 'all', label: 'All (11)' },
+                          { id: 'tally', label: 'Tally Prime (4)' },
+                          { id: 'gst', label: '● GST' },
+                          { id: 'non_gst', label: '○ Non-GST' },
+                        ].map(filterTab => (
+                          <button
+                            key={filterTab.id}
+                            type="button"
                             onClick={() => {
-                              if (themeItem.id === 'thermal') {
-                                handleLayoutChange('THERMAL_80');
+                              if (filterTab.id === 'gst' || filterTab.id === 'non_gst') {
+                                handleSwitchCustomizerInvoiceType(filterTab.id);
                               } else {
-                                handleUpdateConfig({
-                                  ...config,
-                                  secondaryStyle: themeItem.id as SecondaryPrintStyle,
-                                  layout: config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58' ? 'A4' : config.layout
-                                });
+                                setThemeCategoryFilter(filterTab.id as any);
                               }
                             }}
-                            className={`p-3 rounded-2xl border cursor-pointer transition-all ${
-                              isSelected
-                                ? 'border-blue-600 bg-blue-50/70 shadow-xs'
-                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                              themeCategoryFilter === filterTab.id
+                                ? 'bg-[#002d4d] text-[#ffb821] shadow-2xs'
+                                : 'text-slate-600 hover:text-slate-900'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-extrabold text-slate-900 text-xs">{themeItem.name}</span>
-                              {isSelected && <Check className="w-4 h-4 text-blue-600" />}
-                            </div>
-                            <p className="text-[10px] text-slate-500 mt-1 leading-snug">{themeItem.desc}</p>
-                          </div>
-                        );
-                      })}
+                            {filterTab.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+
+                    {/* TALLY PRIME & ERP 9 VISUAL CARD PREVIEW GALLERY (4 Themes) */}
+                    <div className="p-3 rounded-xl bg-[#e4ebf2]/70 border border-[#003a61]/20 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold uppercase tracking-tight text-[#002d4d]">
+                          Tally Prime &amp; Tally.ERP 9 Suite (GST &amp; Non-GST)
+                        </span>
+                        <span className="text-[10px] text-slate-600 font-medium">
+                          Roboto Mono Grid &middot; 20 Rows/Page
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          {
+                            id: 'tally_prime_gst',
+                            name: 'Tally Prime GST',
+                            mode: 'gst',
+                            defaultTitle: 'TAX INVOICE',
+                            meta: 'GST · HSN/SAC · CGST+SGST Split',
+                            desc: 'Consignee + Buyer split grid, HSN/SAC column, Output CGST & SGST calculation & statutory declaration.',
+                            previewType: 'prime_gst'
+                          },
+                          {
+                            id: 'tally_prime_non_gst',
+                            name: 'Tally Prime Non-GST',
+                            mode: 'non_gst',
+                            defaultTitle: 'BILL OF SUPPLY',
+                            meta: 'Non-GST · MRP & Disc% · No Tax Rows',
+                            desc: 'Tally Prime boxed Bill of Supply without HSN or GST rows; highlights MRP, Rate, Disc% & Net Total.',
+                            previewType: 'prime_non_gst'
+                          },
+                          {
+                            id: 'tally_erp9_gst',
+                            name: 'Tally ERP 9 GST',
+                            mode: 'gst',
+                            defaultTitle: 'TAX INVOICE',
+                            meta: 'GST · Seller Top Block · Item GST% Col',
+                            desc: 'Classic Tally.ERP 9 ledger layout with Seller Company top block, Buyer below, HSN & per-item GST% column.',
+                            previewType: 'erp9_gst'
+                          },
+                          {
+                            id: 'tally_simple_estimate',
+                            name: 'Tally Simple Estimate',
+                            mode: 'non_gst',
+                            defaultTitle: 'ESTIMATE',
+                            meta: 'Non-GST · Kacha Bill · Fast Counter',
+                            desc: 'Streamlined Tally Kacha Bill / Estimate header with Particulars, Qty, MRP, Rate, Disc% & Baki Balance.',
+                            previewType: 'simple_est'
+                          },
+                        ]
+                          .filter(t => {
+                            if (themeCategoryFilter === 'gst') return t.mode === 'gst';
+                            if (themeCategoryFilter === 'non_gst') return t.mode === 'non_gst';
+                            return true;
+                          })
+                          .map(tallyTheme => {
+                            const isSelected =
+                              config.secondaryStyle === tallyTheme.id &&
+                              config.layout !== 'THERMAL_80' &&
+                              config.layout !== 'THERMAL_58';
+
+                            return (
+                              <div
+                                key={tallyTheme.id}
+                                onClick={() => {
+                                  handleUpdateConfig({
+                                    ...config,
+                                    secondaryStyle: tallyTheme.id as SecondaryPrintStyle,
+                                    billTitle: tallyTheme.defaultTitle,
+                                    layout:
+                                      config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58'
+                                        ? 'A4'
+                                        : config.layout
+                                  });
+                                }}
+                                className={`group rounded-xl border-2 p-2.5 cursor-pointer transition-all flex flex-col justify-between ${
+                                  isSelected
+                                    ? 'border-[#002d4d] bg-white shadow-md ring-2 ring-[#ffb821]'
+                                    : 'border-slate-300 bg-white/95 hover:border-[#003a61] hover:bg-white'
+                                }`}
+                              >
+                                {/* Miniature Visual Invoice Sheet Preview */}
+                                <div className="bg-white border border-black rounded-[2px] p-1.5 font-mono text-[7px] text-black leading-tight select-none mb-2 shadow-2xs">
+                                  {/* Mini Title Bar */}
+                                  <div
+                                    className={`text-center font-bold py-0.5 border-b border-black uppercase tracking-wider ${
+                                      isSelected ? 'bg-[#002d4d] text-[#ffb821]' : 'bg-[#f1f5f9] text-black'
+                                    }`}
+                                  >
+                                    {tallyTheme.defaultTitle}
+                                  </div>
+
+                                  {/* Mini Header Grid Differentiator */}
+                                  {tallyTheme.previewType === 'prime_gst' && (
+                                    <div className="grid grid-cols-2 border-b border-black text-[6px]">
+                                      <div className="border-r border-black p-1 space-y-0.5">
+                                        <div className="text-slate-500 uppercase">Consignee + GSTIN</div>
+                                        <div className="font-bold truncate">Sharma Trading Co.</div>
+                                        <div className="border-t border-dotted border-slate-400 pt-0.5 text-slate-600">
+                                          Buyer (if other)
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2">
+                                        <div className="border-r border-b border-black p-0.5">Inv No</div>
+                                        <div className="border-b border-black p-0.5">Dated</div>
+                                        <div className="border-r border-black p-0.5">Del Note</div>
+                                        <div className="p-0.5">Split Pay</div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {tallyTheme.previewType === 'prime_non_gst' && (
+                                    <div className="grid grid-cols-2 border-b border-black text-[6px]">
+                                      <div className="border-r border-black p-1 space-y-0.5">
+                                        <div className="text-slate-500 uppercase">Consignee (No GST)</div>
+                                        <div className="font-bold truncate">Cash / Retail Party</div>
+                                        <div className="text-emerald-700 font-bold">Non-GST Supply</div>
+                                      </div>
+                                      <div className="grid grid-cols-2">
+                                        <div className="border-r border-b border-black p-0.5">Bill No</div>
+                                        <div className="border-b border-black p-0.5">Dated</div>
+                                        <div className="border-r border-black p-0.5">Handover</div>
+                                        <div className="p-0.5">Cash/UPI</div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {tallyTheme.previewType === 'erp9_gst' && (
+                                    <div className="grid grid-cols-12 border-b border-black text-[6px]">
+                                      <div className="col-span-7 border-r border-black">
+                                        <div className="bg-slate-100 border-b border-black p-0.5 font-bold truncate">
+                                          Seller: {config.businessName || businessName} (GSTIN)
+                                        </div>
+                                        <div className="p-0.5 truncate">
+                                          Buyer: Sharma Trading Co.
+                                        </div>
+                                      </div>
+                                      <div className="col-span-5 grid grid-cols-2">
+                                        <div className="border-r border-b border-black p-0.5">Inv</div>
+                                        <div className="border-b border-black p-0.5">Date</div>
+                                        <div className="border-r border-black p-0.5">Ref</div>
+                                        <div className="p-0.5">Dest</div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {tallyTheme.previewType === 'simple_est' && (
+                                    <div className="grid grid-cols-12 border-b border-black text-[6px]">
+                                      <div className="col-span-7 border-r border-black p-1">
+                                        <div className="text-slate-500 uppercase">Party Name &amp; Mob</div>
+                                        <div className="font-bold truncate">Walk-in / Counter Party</div>
+                                      </div>
+                                      <div className="col-span-5 p-1 space-y-0.5">
+                                        <div className="font-bold">Est No &bull; Date</div>
+                                        <div className="text-slate-500">Kacha Bill Mode</div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Mini Table Columns Differentiator */}
+                                  <div className="bg-[#f1f5f9] border-b border-black px-1 py-0.5 flex justify-between font-bold text-[5.8px]">
+                                    {tallyTheme.previewType === 'prime_gst' && (
+                                      <>
+                                        <span>Sl | Goods</span>
+                                        <span>HSN/SAC</span>
+                                        <span>Qty | Rate | Disc%</span>
+                                        <span>Amt</span>
+                                      </>
+                                    )}
+                                    {tallyTheme.previewType === 'prime_non_gst' && (
+                                      <>
+                                        <span>Sl | Goods</span>
+                                        <span>Qty</span>
+                                        <span>MRP | Rate | Disc%</span>
+                                        <span>Amt</span>
+                                      </>
+                                    )}
+                                    {tallyTheme.previewType === 'erp9_gst' && (
+                                      <>
+                                        <span>Sl | Goods</span>
+                                        <span>HSN | GST%</span>
+                                        <span>Qty | Rate</span>
+                                        <span>Amt</span>
+                                      </>
+                                    )}
+                                    {tallyTheme.previewType === 'simple_est' && (
+                                      <>
+                                        <span>Sl | Particulars</span>
+                                        <span>Qty</span>
+                                        <span>MRP | Rate | Disc%</span>
+                                        <span>Amt</span>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  {/* Mini Sample Rows */}
+                                  <div className="px-1 py-0.5 space-y-0.5 text-[5.8px] border-b border-black">
+                                    <div className="flex justify-between">
+                                      <span>1. Sunflower Oil 1L</span>
+                                      <span>1,550.00</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-600">
+                                      <span>2. Chakki Atta 10Kg</span>
+                                      <span>1,640.00</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Mini Footer Summary Differentiator */}
+                                  <div className="grid grid-cols-12 text-[5.8px] bg-slate-50">
+                                    <div className="col-span-6 border-r border-black p-0.5 italic truncate">
+                                      INR Four Thousand...
+                                    </div>
+                                    <div className="col-span-6 p-0.5 text-right font-bold">
+                                      {tallyTheme.mode === 'gst'
+                                        ? 'CGST + SGST = ₹4,992.50'
+                                        : 'Net Total = ₹4,870.00'}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Card Title & Metadata Footer */}
+                                <div>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-extrabold text-[#002d4d] text-xs">
+                                      {tallyTheme.name}
+                                    </span>
+                                    {isSelected ? (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-[#002d4d] bg-[#ffb821] px-2 py-0.5 rounded">
+                                        <Check className="w-3 h-3" /> Active
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-[#003a61] group-hover:underline">
+                                        Use Theme →
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[9.5px] font-semibold text-slate-600 mt-0.5">
+                                    {tallyTheme.meta}
+                                  </div>
+                                  <p className="text-[9.5px] text-slate-500 mt-1 leading-snug">
+                                    {tallyTheme.desc}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* STANDARD & CLASSIC THEMES GALLERY (Existing 7 Themes Preserved 100%) */}
+                    {themeCategoryFilter !== 'tally' && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-slate-500">
+                            Classic &amp; Modern BillBook Themes
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Original Presets
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {[
+                            { id: 'estimate', mode: 'non_gst', name: 'Estimate', desc: 'Classic bordered A5/A4 paginated Estimate sheet (20 rows/page) with MRP, Rate & Disc%' },
+                            { id: 'modern', mode: 'gst', name: 'Modern BillBook', desc: 'Colored header & clean rounded cards (MyBillBook Signature)' },
+                            { id: 'classic_gst', mode: 'gst', name: 'Classic GST Tax Invoice', desc: 'Formal Indian GST grid, HSN table, state codes & tax breakdown' },
+                            { id: 'minimal', mode: 'non_gst', name: 'Minimalist Clean', desc: 'Monochrome corporate aesthetic, hairline dividers & pure focus on items' },
+                            { id: 'wholesale', mode: 'non_gst', name: 'Compact Retail', desc: 'Space-saving layout, maximum items per sheet' },
+                            { id: 'stylish', mode: 'gst', name: 'Stylish Premium', desc: 'Vibrant header banner, rounded badges, QR pay highlight & modern cards' },
+                            { id: 'thermal', mode: 'non_gst', name: 'Thermal POS Roll', desc: 'Optimized for 80mm & 58mm receipt printers' },
+                          ]
+                            .filter(t => {
+                              if (themeCategoryFilter === 'gst') return t.mode === 'gst';
+                              if (themeCategoryFilter === 'non_gst') return t.mode === 'non_gst';
+                              return true;
+                            })
+                            .map(themeItem => {
+                              const isSelected = themeItem.id === 'thermal'
+                                ? (config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58')
+                                : (config.secondaryStyle === themeItem.id && config.layout !== 'THERMAL_80' && config.layout !== 'THERMAL_58');
+
+                              return (
+                                <div
+                                  key={themeItem.id}
+                                  onClick={() => {
+                                    if (themeItem.id === 'thermal') {
+                                      handleLayoutChange('THERMAL_80');
+                                    } else {
+                                      handleUpdateConfig({
+                                        ...config,
+                                        secondaryStyle: themeItem.id as SecondaryPrintStyle,
+                                        layout: config.layout === 'THERMAL_80' || config.layout === 'THERMAL_58' ? 'A4' : config.layout
+                                      });
+                                    }
+                                  }}
+                                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                                    isSelected
+                                      ? 'border-[#002d4d] bg-blue-50/70 shadow-xs ring-1 ring-[#ffb821]'
+                                      : 'border-slate-200 bg-white hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-extrabold text-slate-900 text-xs">{themeItem.name}</span>
+                                    {isSelected && <Check className="w-4 h-4 text-[#002d4d]" />}
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-1 leading-snug">{themeItem.desc}</p>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Accent Color Palette */}

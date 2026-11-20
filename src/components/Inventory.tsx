@@ -557,25 +557,25 @@ export default function Inventory({
 
   return (
     <div className="space-y-6">
-      {/* Header Info */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {/* DESIGN VARIATION 6: INVENTORY HEADER & ACTION BAR */}
+      <div className="v6-card !mb-0 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Products & Stock Control</h2>
-          <p className="text-xs text-slate-400 font-semibold mt-1">
-            Manage merchandise list, unit sales prices, current stock balance levels, and fast scan bulk restocks.
+          <h2 className="v6-view-title">Products &amp; Stock Control</h2>
+          <p className="text-xs text-[#64748b] font-medium mt-1">
+            Manage product catalog, HSN/GST rates, unit selling prices, barcode labels, and stock levels offline
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2 w-full md:w-auto font-sans">
+        <div className="flex flex-wrap gap-2 w-full lg:w-auto font-sans">
           {onOpenFileImport && (
             <button
               type="button"
               onClick={onOpenFileImport}
-              className="flex-1 md:flex-none justify-center bg-teal-600 hover:bg-teal-700 text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+              className="flex-1 md:flex-none justify-center bg-[#f8fafc] hover:bg-slate-100 border border-[#e2e8f0] text-[#1a1c21] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
               title="Add products & data from saved project files or local JSON/CSV file"
             >
               <span>📂</span>
-              <span>Add File Data (फ़ाइल डेटा जोड़ें)</span>
+              <span>Import File</span>
             </button>
           )}
           {userRole !== 'clerk' && (
@@ -585,56 +585,39 @@ export default function Inventory({
                 setGlobalMarkupPct('10');
                 setShowGlobalMarkupModal(true);
               }}
-              className="flex-1 md:flex-none justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+              className="flex-1 md:flex-none justify-center bg-[#f8fafc] hover:bg-slate-100 border border-[#e2e8f0] text-[#059669] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
             >
               <span>💹</span>
-              <span>Global Price Markup</span>
+              <span>Price Markup</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={() => { setStockIncrements({}); setShowBulkStockModal(true); }}
-            className="flex-1 md:flex-none justify-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+            className="flex-1 md:flex-none justify-center bg-[#fffbeb] hover:bg-amber-100 border border-amber-200 text-[#d97706] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
           >
             <span>📈</span>
-            <span>Bulk Stock Update</span>
+            <span>Bulk Stock</span>
           </button>
           
           <button
             type="button"
             onClick={openBulkSpreadsheet}
-            className="flex-1 md:flex-none justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+            className="flex-1 md:flex-none justify-center bg-[#eff6ff] hover:bg-blue-100 border border-blue-200 text-[#2563eb] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
           >
             <Keyboard className="w-4 h-4" />
-            <span>Excel Add Bulk</span>
+            <span>Excel Bulk Add</span>
           </button>
-
-          <label className={`flex-1 md:flex-none justify-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md shadow-purple-100 flex items-center space-x-2 transition-all hover:-translate-y-0.5 active:translate-y-0 cursor-pointer text-center ${isScanning || isBatchScanning ? 'opacity-50 pointer-events-none' : ''}`}>
-            <Sparkles className="w-4 h-4 text-purple-200 animate-pulse" />
-            <span>AI Batch Scan (Max 50 Photo/PDF)</span>
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              disabled={isScanning || isBatchScanning}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  handleBatchFileSelection(e.target.files);
-                  e.target.value = ''; // clear
-                }
-              }}
-              className="hidden"
-            />
-          </label>
 
           <button
             type="button"
             onClick={() => setShowAddProdModal(true)}
-            className="flex-1 md:flex-none justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md shadow-blue-100 flex items-center space-x-1.5 transition-all hover:-translate-y-0.5 cursor-pointer"
+            className="flex-1 md:flex-none justify-center bg-[#2563eb] hover:bg-blue-700 text-white font-extrabold py-2.5 px-5 rounded-xl text-xs shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
+            style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
             <Plus className="w-4 h-4" />
-            <span>Add Single Product</span>
+            <span>+ Add Product</span>
           </button>
         </div>
       </div>
@@ -762,7 +745,7 @@ export default function Inventory({
               <div className="flex flex-wrap gap-2 mt-2.5">
                 {lowStockProducts.map(lp => (
                   <span key={lp.id} className="inline-flex items-center gap-1 bg-white border border-red-200 text-red-700 font-black px-2.5 py-1 rounded-xl text-[10px] font-mono shadow-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping"></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
                     {lp.name}: <span className="underline font-extrabold text-red-800">{lp.stock} {lp.unit} left</span>
                   </span>
                 ))}

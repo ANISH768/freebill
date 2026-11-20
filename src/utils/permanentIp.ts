@@ -11,8 +11,8 @@ export interface PermanentUserIpInfo {
   phone: string;
   ipHost: string;          // e.g. "10.198.145.220"
   ipWithPort: string;      // e.g. "10.198.145.220:3000"
-  autoLoginPath: string;   // e.g. "/ip/10.198.145.220"
-  autoLoginUrl: string;    // e.g. "https://.../ip/10.198.145.220"
+  autoLoginPath: string;   // e.g. "/ip/10.198.145.220-9876543210"
+  autoLoginUrl: string;    // e.g. "https://.../ip/10.198.145.220-9876543210"
 }
 
 export function getPermanentIpForUser(phone: string | null | undefined, baseOrigin?: string): PermanentUserIpInfo {
@@ -32,7 +32,7 @@ export function getPermanentIpForUser(phone: string | null | undefined, baseOrig
 
   const ipHost = `10.${octet2}.${octet3}.${octet4}`;
   const ipWithPort = `${ipHost}:3000`;
-  const autoLoginPath = `/ip/${ipHost}`;
+  const autoLoginPath = `/ip/${ipHost}-${cleanDigits}`;
   const origin =
     baseOrigin ||
     (typeof window !== 'undefined' && window.location?.origin
@@ -49,13 +49,17 @@ export function getPermanentIpForUser(phone: string | null | undefined, baseOrig
 }
 
 /**
- * Extracts a permanent IP token from the current browser URL if opened via `/ip/10.X.Y.Z` or `?ip=10.X.Y.Z`
+ * Extracts a permanent IP token (and embedded phone ID if present) from the browser URL
+ * Supports:
+ * - `/ip/10.X.Y.Z-9876543210`
+ * - `/ip/10.X.Y.Z`
+ * - `?ip=10.X.Y.Z`
  */
 export function extractPermanentIpFromLocation(): string | null {
   if (typeof window === 'undefined') return null;
 
   const pathname = window.location.pathname || '';
-  const pathMatch = pathname.match(/^\/ip\/([0-9.]+)(?::\d+)?/i);
+  const pathMatch = pathname.match(/^\/ip\/([0-9.]+(?:-\d{10})?)(?::\d+)?/i);
   if (pathMatch && pathMatch[1]) {
     return pathMatch[1].trim();
   }
