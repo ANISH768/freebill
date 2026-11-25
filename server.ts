@@ -7,6 +7,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import twilio from "twilio";
 import crypto from "crypto";
+import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import {
+  getOrCreateUser,
+  getUserBillingSnapshot,
+  syncBulkUserBillingData,
+  deleteEntityByExternalId,
+} from "./src/db/cloudsqlRepository.ts";
 
 dotenv.config({ override: true });
 
@@ -694,82 +701,77 @@ async function startServer() {
 
   // AI-powered purchase bill OCR/scan endpoint using Gemini SDK
   app.post("/api/scan-bill", async (req, res) => {
-    const { image, customApiKey } = req.body;
-    if (!image) {
-      return res.status(400).json({ error: "No image provided for scanning." });
+    const { image } = req.body || {};
+    if (!image || typeof image !== "string") {
+      return res.status(400).json({ error: "No image or PDF provided for scanning." });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || customApiKey;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({
-        error: "GEMINI_API_KEY is not configured on the server. Please define it in your AI Studio Environment Settings / Secrets, or set your Custom Gemini API Key in the Profile & Shop Settings modal on your PC."
+        error: "AI bill scanning is not configured on the server. Please verify the API key in Settings > Secrets."
       });
     }
 
     try {
-      // Lazy initialize SDK as instructed in guidelines to prevent startup crashes
       const ai = new GoogleGenAI({
-        apiKey: apiKey,
+        apiKey,
         httpOptions: {
           headers: {
-            'User-Agent': 'aistudio-build',
+            "User-Agent": "aistudio-build",
           }
         }
       });
 
-      // Split base64 header if present
+      // Split base64 data URI header if present (supports JPEG, PNG, WebP, and PDF)
       let base64Data = image;
       let mimeType = "image/jpeg";
 
       if (image.includes(";base64,")) {
         const parts = image.split(";base64,");
         const match = parts[0].match(/data:(.*)/);
-        if (match) {
-          mimeType = match[1];
+        if (match && match[1]) {
+          mimeType = match[1].trim();
         }
         base64Data = parts[1];
       }
 
-      const prompt = `Analyze this purchase bill, invoice document, or image. Extract all line items or products listed on this bill. For each item:
-- Extract the item name.
-- Estimate/generate a short unique SKU code if not visible (e.g. SKU-TATA-32, SKU-ACC-GOLD).
-- Determine the quantity/units purchased (stock).
+      const prompt = `Analyze this purchase bill, invoice document, or photo. Extract every line item or product listed on this bill. For each item:
+- Extract the item name cleanly.
+- Extract or generate a short unique SKU code if not visible (e.g. SKU-TATA-32, SKU-ACC-GOLD).
+- Extract the quantity purchased as stock (integer or numeric count, default to 1 if unclear).
 - Extract the purchase cost rate per unit listed on the bill (e.g. under RATE, PRICE, cost per unit) as purchasePrice.
-- Extract or estimate the discount percentage if listed on the bill (e.g. under DISC%, DISCOUNT) as discount (default to 0).
-- Determine or estimate the MRP (Maximum Retail Price). If MRP is not listed, make it approximately 10% to 30% higher than the purchase price.
-- Set the selling price (price field) as either the MRP or a suitable markup over the purchasePrice (usually 10% to 20% higher than purchasePrice).
+- Extract the discount percentage if listed on the bill (e.g. under DISC%, DISCOUNT) as discount (default to 0).
+- Determine or estimate the MRP (Maximum Retail Price). If MRP is not listed, make it approximately 15% to 25% higher than purchasePrice.
+- Set the selling price (price field) as either the listed selling rate/MRP or a 10% to 20% markup over purchasePrice.
 Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 'Pcs' if unclear.`;
 
+      const modelRotation = [
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-4-hydrogen",
+      ];
+
       let response;
-      let attempts = 0;
-      const maxAttempts = 4;
       let lastError: any = null;
 
-      while (attempts < maxAttempts) {
-        // We rotate across separate daily free quota pools to bypass the 20 requests/day per model limits.
-        // Attempt 1: gemini-3.5-flash (main)
-        // Attempt 2: gemini-flash-latest (different free tier bucket)
-        // Attempt 3: gemini-3.1-flash-lite (different free tier bucket)
-        // Attempt 4: gemini-3.5-flash
-        let modelToUse = "gemini-3.5-flash";
-        if (attempts === 1) {
-          modelToUse = "gemini-flash-latest";
-        } else if (attempts === 2) {
-          modelToUse = "gemini-3.1-flash-lite";
-        }
+      for (let attempt = 0; attempt < modelRotation.length; attempt++) {
+        const modelToUse = modelRotation[attempt];
         try {
-          console.log(`[Gemini API] Attempt ${attempts + 1} with model: ${modelToUse}`);
+          console.log(`[Gemini API] Scan attempt ${attempt + 1} with model: ${modelToUse}`);
           response = await ai.models.generateContent({
             model: modelToUse,
-            contents: [
-              {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: mimeType
-                }
-              },
-              prompt
-            ],
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: base64Data,
+                    mimeType,
+                  }
+                },
+                { text: prompt }
+              ]
+            },
             config: {
               responseMimeType: "application/json",
               responseSchema: {
@@ -780,70 +782,64 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
                     name: { type: Type.STRING, description: "The name or description of the product/item on the bill" },
                     sku: { type: Type.STRING, description: "The SKU code (e.g. SKU-BUILD, SKU-TATA-53)" },
                     unit: { type: Type.STRING, description: "Unit of measurement. MUST be one of: Bags, Pcs, Boxes, Kgs, Ltr." },
-                    mrp: { type: Type.NUMBER, description: "Maximum Retail Price (MRP). Estimate 1.1x - 1.3x of purchasePrice if not visible." },
+                    mrp: { type: Type.NUMBER, description: "Maximum Retail Price (MRP). Estimate 1.15x - 1.25x of purchasePrice if not visible." },
                     price: { type: Type.NUMBER, description: "Estimated or listed selling price per unit." },
                     purchasePrice: { type: Type.NUMBER, description: "The purchase cost rate per unit listed on the bill." },
                     discount: { type: Type.NUMBER, description: "The discount percentage (e.g. 10, 27) listed for this item on the bill. Default to 0." },
-                    stock: { type: Type.INTEGER, description: "Quantity of items purchased in this bill." }
+                    stock: { type: Type.NUMBER, description: "Quantity of items purchased in this bill." }
                   },
                   required: ["name", "sku", "unit", "mrp", "price", "purchasePrice", "discount", "stock"]
                 }
               }
             }
           });
-          break; // Success! Exit retry loop.
+          break;
         } catch (err: any) {
           lastError = err;
-          attempts++;
-          const isRateLimit = err.message?.toLowerCase().includes("quota") || 
-                              err.message?.toLowerCase().includes("rate limit") || 
-                              err.message?.toLowerCase().includes("429") ||
-                              err.status === 429 ||
-                              err.statusCode === 429;
-          
-          if (attempts < maxAttempts) {
-            // Exponential backoff: 3s, 6s, 12s
-            const delay = Math.pow(2, attempts - 1) * 3000;
-            console.warn(`[Gemini API Warning] Attempt ${attempts} with ${modelToUse} failed (${err.message}). Retrying in ${delay}ms...`);
-            await new Promise(r => setTimeout(r, delay));
+          const isLastAttempt = attempt === modelRotation.length - 1;
+          if (!isLastAttempt) {
+            const delay = (attempt + 1) * 2000;
+            console.warn(`[Gemini API Warning] Attempt ${attempt + 1} (${modelToUse}) failed: ${err?.message || err}. Retrying in ${delay}ms...`);
+            await new Promise((r) => setTimeout(r, delay));
           } else {
-            console.error(`[Gemini API Error] All ${maxAttempts} attempts failed.`);
+            console.error(`[Gemini API Error] All ${modelRotation.length} scan attempts failed.`);
           }
         }
       }
 
       if (!response) {
-        throw lastError || new Error("Failed to generate content after multiple retries");
+        throw lastError || new Error("Failed to scan purchase bill after retries.");
       }
 
       const text = response.text;
       if (!text) {
-        throw new Error("Empty text returned from Gemini API model.");
+        throw new Error("Empty response returned while reading purchase bill.");
       }
 
       let parsedItems;
       try {
         parsedItems = JSON.parse(text);
-      } catch (jsonErr) {
-        // Try stripping markdown blocks and clean trailing characters
+      } catch {
         let cleaned = text.trim();
         if (cleaned.startsWith("```")) {
           cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, "");
           cleaned = cleaned.replace(/\n?```$/, "");
         }
-        cleaned = cleaned.trim();
-        parsedItems = JSON.parse(cleaned);
+        parsedItems = JSON.parse(cleaned.trim());
       }
 
-      res.json({ success: true, items: parsedItems });
+      res.json({ success: true, items: Array.isArray(parsedItems) ? parsedItems : [] });
     } catch (err: any) {
       console.error("Gemini Scan Bill Error:", err);
-      let errMsg = "Failed to scan and parse purchase bill using AI. Please ensure the file is clear and text is readable.";
-      const rawMsg = err.message || "";
-      if (rawMsg.toLowerCase().includes("quota") || rawMsg.toLowerCase().includes("rate limit") || rawMsg.toLowerCase().includes("429") || err.status === 429) {
-        errMsg = "Gemini API daily free tier limit exceeded (20 scans per model reached). Our engine auto-switched models to fetch your bill, but all fallback models are fully exhausted. Please retry the failed files in a few seconds, or insert custom API key under Settings to get unlimited usage!";
+      let errMsg = "Failed to scan and parse purchase bill. Please ensure the photo or PDF is clear and readable.";
+      const rawMsg = String(err?.message || "");
+      const lowerMsg = rawMsg.toLowerCase();
+      if (lowerMsg.includes("quota") || lowerMsg.includes("rate limit") || lowerMsg.includes("429") || err?.status === 429) {
+        errMsg = "Scan rate limit reached temporarily. Please wait a few seconds and click Start Scan again to retry failed files.";
+      } else if (lowerMsg.includes("api_key_invalid") || lowerMsg.includes("permission_denied") || err?.status === 403) {
+        errMsg = "AI scanning key error. Please check your Gemini API key in Settings > Secrets.";
       } else if (rawMsg) {
-        errMsg = `AI Scan Error: ${rawMsg}`;
+        errMsg = `Scan Error: ${rawMsg}`;
       }
       res.status(500).json({
         error: errMsg,
@@ -2144,6 +2140,76 @@ Ensure the unit field is exactly one of: Bags, Pcs, Boxes, Kgs, Ltr. Default to 
     }
 
     res.json({ success: true, list: currentDb.backups?.[trimmedPhone] || [] });
+  });
+
+  // --- AUTHENTICATED CLOUD SQL (POSTGRESQL) API ROUTES ---
+  app.get("/api/cloudsql/bootstrap", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const uid = req.user!.uid;
+      const email = req.user!.email || "";
+      const displayName = typeof req.user!.name === "string" ? req.user!.name : undefined;
+
+      await getOrCreateUser(uid, email, displayName);
+      const snapshot = await getUserBillingSnapshot(uid);
+      res.json({ success: true, ...snapshot });
+    } catch (error) {
+      console.error("Cloud SQL bootstrap route error:", error);
+      res.status(500).json({ error: "Failed to load account data. Please try again later." });
+    }
+  });
+
+  app.post("/api/cloudsql/sync-bulk", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const uid = req.user!.uid;
+      const email = req.user!.email || "";
+      const displayName = typeof req.user!.name === "string" ? req.user!.name : undefined;
+      const { businessName, clients, products, estimates, stockLogs } = req.body || {};
+
+      if (
+        (clients !== undefined && !Array.isArray(clients)) ||
+        (products !== undefined && !Array.isArray(products)) ||
+        (estimates !== undefined && !Array.isArray(estimates)) ||
+        (stockLogs !== undefined && !Array.isArray(stockLogs))
+      ) {
+        return res.status(400).json({ error: "Invalid sync payload format." });
+      }
+
+      const safeBusinessName = typeof businessName === "string" ? businessName.trim() : undefined;
+      await getOrCreateUser(uid, email, displayName, safeBusinessName);
+      const summary = await syncBulkUserBillingData(uid, {
+        businessName: safeBusinessName,
+        clients: Array.isArray(clients) ? clients : [],
+        products: Array.isArray(products) ? products : [],
+        estimates: Array.isArray(estimates) ? estimates : [],
+        stockLogs: Array.isArray(stockLogs) ? stockLogs : [],
+      });
+
+      res.json({ success: true, ...summary });
+    } catch (error) {
+      console.error("Cloud SQL sync-bulk route error:", error);
+      res.status(500).json({ error: "Failed to save account data. Please try again later." });
+    }
+  });
+
+  app.delete("/api/cloudsql/:entity/:externalId", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const uid = req.user!.uid;
+      const entity = String(req.params.entity || "").trim();
+      const externalId = String(req.params.externalId || "").trim();
+
+      if (entity !== "client" && entity !== "product" && entity !== "estimate") {
+        return res.status(400).json({ error: "Unsupported record type." });
+      }
+      if (!externalId) {
+        return res.status(400).json({ error: "Record identifier is required." });
+      }
+
+      await deleteEntityByExternalId(uid, entity, externalId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Cloud SQL delete route error:", error);
+      res.status(500).json({ error: "Failed to delete record. Please try again later." });
+    }
   });
 
 

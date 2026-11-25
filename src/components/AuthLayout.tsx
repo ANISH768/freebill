@@ -26,9 +26,35 @@ import {
   Lock,
   UserCheck,
   Briefcase,
+  Mail,
+  Loader2,
 } from 'lucide-react';
 import { recordOtpAuditLog, getOtpAuditLogs, clearOtpAuditLogs } from '../utils/otpAuditLogger';
 import { recordSystemAudit } from '../utils/systemAuditLogger';
+import { useCloudAuth } from '../context/CloudAuthContext';
+
+function GoogleLogoSvg({ className = 'w-[18px] h-[18px] shrink-0' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  );
+}
 
 interface AuthLayoutProps {
   onLoginSuccess: (
@@ -97,6 +123,16 @@ export default function AuthLayout({
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Google Sign-In & Registration States
+  const { signInWithGoogle, isSigningIn: isGoogleBusy, authError: googleAuthError } = useCloudAuth();
+  const [googleRegisterProfile, setGoogleRegisterProfile] = useState<{
+    email: string;
+    displayName: string;
+  } | null>(null);
+  const [googleUnregisteredEmail, setGoogleUnregisteredEmail] = useState<string | null>(null);
+  const [googleQuickPassword, setGoogleQuickPassword] = useState('');
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
   // 3-Step Registration Wizard States
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
@@ -369,6 +405,7 @@ export default function AuthLayout({
       password: regPassword.trim(),
       businessName: regBusiness.trim(),
       ownerName: regOwnerName.trim() || 'Shop Owner',
+      email: googleRegisterProfile?.email || undefined,
       businessType: regBusinessType,
       gstin: regGstin.trim().toUpperCase(),
       address: regAddress.trim(),
@@ -691,6 +728,230 @@ export default function AuthLayout({
     );
   };
 
+  // Google Sign-In on Login Tab (logs into existing linked account)
+  const handleGoogleLogin = async () => {
+    setError(null);
+    setSuccess(null);
+    setGoogleUnregisteredEmail(null);
+
+    const outcome = await signInWithGoogle();
+    if (!outcome?.user?.email) {
+      if (googleAuthError) {
+        setError(googleAuthError);
+      }
+      return;
+    }
+
+    const googleEmail = outcome.user.email.trim().toLowerCase();
+    const displayName = outcome.user.displayName?.trim() || '';
+
+    // 1. Check local dbUsers for matching email
+    let matchedUser = dbUsers.find(
+      (u) => u.email && u.email.trim().toLowerCase() === googleEmail
+    );
+
+    // 2. Fallback check against /api/users if online
+    if (!matchedUser && (typeof navigator === 'undefined' || navigator.onLine)) {
+      try {
+        const res = await fetch('/api/users');
+        if (res.ok) {
+          const serverUsers: User[] = await res.json();
+          if (Array.isArray(serverUsers)) {
+            matchedUser = serverUsers.find(
+              (u) => u.email && u.email.trim().toLowerCase() === googleEmail
+            );
+            if (matchedUser) {
+              const merged = [
+                ...dbUsers.filter((u) => u.phone !== matchedUser!.phone),
+                matchedUser,
+              ];
+              onUpdateUsers(merged);
+            }
+          }
+        }
+      } catch {
+        // Ignore offline fallback failure
+      }
+    }
+
+    if (matchedUser) {
+      try {
+        if (rememberDevice) {
+          localStorage.setItem('remembered_login_phone', matchedUser.phone);
+        }
+      } catch {
+        // Ignore storage errors
+      }
+      await recordSystemAudit({
+        action: 'LOGIN',
+        details: `${loginRole === 'admin' ? 'Owner / Admin' : 'Billing Clerk'} signed in with Google (${googleEmail}).`,
+        userId: matchedUser.phone,
+        userName: matchedUser.businessName,
+        userRole: loginRole,
+        userPhone: matchedUser.phone,
+      });
+      const resolvedPassword =
+        loginRole === 'clerk'
+          ? matchedUser.clerkPassword || 'clerk123'
+          : matchedUser.password;
+      onLoginSuccess(matchedUser.phone, matchedUser.businessName, loginRole, resolvedPassword);
+      return;
+    }
+
+    // Account not registered yet — pre-fill Register tab profile and prompt switch
+    setGoogleRegisterProfile({ email: outcome.user.email, displayName });
+    if (displayName && !regOwnerName) {
+      setRegOwnerName(displayName);
+    }
+    setGoogleUnregisteredEmail(outcome.user.email);
+  };
+
+  // Google Sign-Up trigger on New Account (Register) Tab
+  const handleGoogleRegisterStart = async () => {
+    setError(null);
+    setSuccess(null);
+    setGoogleUnregisteredEmail(null);
+
+    const outcome = await signInWithGoogle();
+    if (!outcome?.user?.email) {
+      if (googleAuthError) {
+        setError(googleAuthError);
+      }
+      return;
+    }
+
+    const googleEmail = outcome.user.email.trim().toLowerCase();
+    const existingByEmail = dbUsers.find(
+      (u) => u.email && u.email.trim().toLowerCase() === googleEmail
+    );
+    if (existingByEmail) {
+      setSuccess(`Welcome back! Found existing shop "${existingByEmail.businessName}" linked to ${outcome.user.email}. Signing you in...`);
+      setTimeout(() => {
+        onLoginSuccess(existingByEmail.phone, existingByEmail.businessName, 'admin', existingByEmail.password);
+      }, 600);
+      return;
+    }
+
+    setGoogleRegisterProfile({
+      email: outcome.user.email,
+      displayName: outcome.user.displayName?.trim() || '',
+    });
+    if (outcome.user.displayName) {
+      setRegOwnerName(outcome.user.displayName.trim());
+    }
+    setSuccess(`Google account verified (${outcome.user.email}). Enter your Shop Name and Mobile Number to finish setup.`);
+  };
+
+  // Complete Quick Registration after Google Sign-In on New Account Tab
+  const handleGoogleQuickRegisterSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (!googleRegisterProfile) return;
+
+    const cleanBusiness = regBusiness.trim();
+    const cleanPhone = regPhone.replace(/\D/g, '').trim();
+    const cleanOwner = regOwnerName.trim() || googleRegisterProfile.displayName || 'Shop Owner';
+    const cleanPassword = googleQuickPassword.trim() || `g${cleanPhone.slice(-6)}`;
+
+    if (!cleanBusiness) {
+      setError('Please enter your Business / Shop Name.');
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      setError('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (googleQuickPassword.trim() && googleQuickPassword.trim().length < 4) {
+      setError('Counter password must be at least 4 characters (or leave blank to auto-generate).');
+      return;
+    }
+
+    const existingPhoneUser = dbUsers.find((u) => u.phone.trim() === cleanPhone);
+    if (existingPhoneUser) {
+      setError(`An account with mobile +91 ${cleanPhone} already exists. Please sign in on the Login tab.`);
+      return;
+    }
+
+    setIsGoogleSubmitting(true);
+    try {
+      const recoveryCode = `BSP-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.floor(
+        1000 + Math.random() * 9000
+      )}`;
+      const initials =
+        cleanBusiness
+          .split(/\s+/)
+          .map((w) => w[0]?.toUpperCase() || '')
+          .join('')
+          .slice(0, 4) || 'BSP';
+      const defaultPrefix = `${initials}/2026-27/`;
+
+      const newUser: User = {
+        phone: cleanPhone,
+        password: cleanPassword,
+        businessName: cleanBusiness,
+        ownerName: cleanOwner,
+        email: googleRegisterProfile.email,
+        businessType: regBusinessType,
+        gstin: regGstin.trim().toUpperCase(),
+        address: regAddress.trim(),
+        state: regState,
+        clerkPassword: 'clerk123',
+        invoicePrefix: defaultPrefix,
+        accentColor: regAccentColor,
+        recoveryCode,
+        securityQuestion: regSecurityQuestion,
+        securityAnswer: 'india',
+      };
+
+      const updatedUsers = [...dbUsers.filter((u) => u.phone !== cleanPhone), newUser];
+      onUpdateUsers(updatedUsers);
+
+      try {
+        localStorage.setItem('remembered_login_phone', cleanPhone);
+        localStorage.setItem(`newly_registered_${cleanPhone}`, 'true');
+        localStorage.setItem(`pos_invoice_prefix_${cleanPhone}`, defaultPrefix);
+        localStorage.setItem('pos_invoice_prefix', defaultPrefix);
+        const rawPrint = localStorage.getItem('pos_print_template_config');
+        const existingPrint = rawPrint ? JSON.parse(rawPrint) : {};
+        localStorage.setItem(
+          'pos_print_template_config',
+          JSON.stringify({
+            ...existingPrint,
+            businessName: newUser.businessName,
+            phone: newUser.phone,
+            state: newUser.state || existingPrint.state || '27-Maharashtra',
+            primaryColor: newUser.accentColor || '#4f46e5',
+          })
+        );
+      } catch {
+        // Ignore storage quota issues
+      }
+
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        fetch('/api/auth/register-offline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUser),
+        }).catch(() => {});
+      }
+
+      await recordSystemAudit({
+        action: 'SETTINGS_CHANGED',
+        details: `Registered new business "${newUser.businessName}" (+91 ${newUser.phone}) with Google account (${googleRegisterProfile.email}).`,
+        userId: newUser.phone,
+        userName: newUser.businessName,
+        userRole: 'admin',
+        userPhone: newUser.phone,
+      });
+
+      onLoginSuccess(newUser.phone, newUser.businessName, 'admin', newUser.password);
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
+
   // Offline Password / PIN Reset Handler
   const handleOfflinePasswordReset = async (e: FormEvent) => {
     e.preventDefault();
@@ -802,6 +1063,47 @@ export default function AuthLayout({
           </div>
         </div>
 
+        {/* Clear Login / New Account Segmented Switcher */}
+        {mode !== 'reset' && (
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-5 border border-slate-200/80">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setError(null);
+                setSuccess(null);
+                setGoogleUnregisteredEmail(null);
+              }}
+              className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                mode === 'login'
+                  ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/70'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5 shrink-0" />
+              <span>Login</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setWizardStep(1);
+                setError(null);
+                setSuccess(null);
+                setGoogleUnregisteredEmail(null);
+              }}
+              className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                mode === 'register'
+                  ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/70'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5 shrink-0" />
+              <span>New Account</span>
+            </button>
+          </div>
+        )}
+
         {/* Error & Success Alerts */}
         {error && (
           <div className="mb-4 bg-red-50 border-l-4 border-red-500 text-red-700 p-3 rounded-xl flex items-start gap-2 text-xs">
@@ -814,6 +1116,33 @@ export default function AuthLayout({
           <div className="mb-4 bg-emerald-50 border-l-4 border-emerald-500 text-emerald-800 p-3 rounded-xl flex items-start gap-2 text-xs">
             <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span className="font-bold leading-relaxed">{success}</span>
+          </div>
+        )}
+
+        {googleUnregisteredEmail && mode === 'login' && (
+          <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 text-xs space-y-2.5">
+            <div className="flex items-start gap-2 text-indigo-950">
+              <Mail className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black">No BillSync Pro account linked to {googleUnregisteredEmail}</p>
+                <p className="text-[11px] text-indigo-700 font-medium mt-0.5">
+                  Create a new shop account using this Google profile in seconds.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setWizardStep(1);
+                setGoogleUnregisteredEmail(null);
+                setError(null);
+              }}
+              className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <UserPlus className="w-3.5 h-3.5 shrink-0" />
+              <span>Register New Account with Google</span>
+            </button>
           </div>
         )}
 
@@ -997,6 +1326,28 @@ export default function AuthLayout({
               <LogIn className="w-4 h-4" />
             </button>
 
+            <div className="relative flex items-center py-1">
+              <div className="flex-grow border-t border-slate-200" />
+              <span className="shrink-0 mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                or sign in with Google
+              </span>
+              <div className="flex-grow border-t border-slate-200" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isGoogleBusy || isLoggingIn}
+              className="w-full h-11 px-4 rounded-xl bg-white hover:bg-[#f8f9fa] active:bg-[#f1f3f4] border border-[#747775] text-[#1f1f1f] text-sm font-medium transition-colors flex items-center justify-center gap-3 shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+            >
+              {isGoogleBusy ? (
+                <Loader2 className="w-4 h-4 animate-spin text-slate-600 shrink-0" />
+              ) : (
+                <GoogleLogoSvg />
+              )}
+              <span>{isGoogleBusy ? 'Connecting Google Account...' : 'Sign in with Google'}</span>
+            </button>
+
             <div className="pt-3 border-t border-slate-100 text-center">
               <p className="text-xs text-slate-500 font-medium">
                 Setting up a new shop counter?{' '}
@@ -1007,10 +1358,11 @@ export default function AuthLayout({
                     setWizardStep(1);
                     setError(null);
                     setSuccess(null);
+                    setGoogleUnregisteredEmail(null);
                   }}
                   className="text-indigo-600 font-black hover:underline cursor-pointer"
                 >
-                  Register New Business (3-Step Setup)
+                  Create New Account
                 </button>
               </p>
             </div>
@@ -1054,8 +1406,136 @@ export default function AuthLayout({
             </div>
 
             {/* STEP 1: BUSINESS & OWNER DETAILS */}
-            {wizardStep === 1 && (
+            {wizardStep === 1 && googleRegisterProfile && (
+              <form onSubmit={handleGoogleQuickRegisterSubmit} className="space-y-3.5">
+                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-white border border-emerald-200 flex items-center justify-center shrink-0">
+                      <GoogleLogoSvg className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 block">
+                        Google Profile Ready
+                      </span>
+                      <span className="text-xs font-bold text-slate-900 truncate block">
+                        {googleRegisterProfile.email}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGoogleRegisterProfile(null);
+                      setSuccess(null);
+                    }}
+                    className="text-[11px] font-bold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-white/80 cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    Use Mobile Only
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    Business / Shop Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Shree Ganesh Kirana"
+                    value={regBusiness}
+                    onChange={(e) => setRegBusiness(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-indigo-600"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Owner Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Your name"
+                      value={regOwnerName}
+                      onChange={(e) => setRegOwnerName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-indigo-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Mobile Number (+91) *
+                    </label>
+                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:bg-white focus-within:border-indigo-600">
+                      <span className="px-2.5 py-2.5 bg-slate-100 border-r border-slate-200 text-xs font-black text-slate-600 font-mono">
+                        +91
+                      </span>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={10}
+                        required
+                        placeholder="10-digit mobile"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value.replace(/\D/g, ''))}
+                        className="w-full p-2.5 text-xs font-black text-slate-900 bg-transparent outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    Offline Backup Password (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Optional 4+ char password for offline mobile login"
+                    value={googleQuickPassword}
+                    onChange={(e) => setGoogleQuickPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-indigo-600"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isGoogleSubmitting}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black py-3 rounded-xl text-xs sm:text-sm shadow-md shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+                >
+                  {isGoogleSubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{isGoogleSubmitting ? 'Creating Shop Account...' : 'Create Account & Open Dashboard'}</span>
+                </button>
+              </form>
+            )}
+
+            {wizardStep === 1 && !googleRegisterProfile && (
               <form onSubmit={handleStep1Next} className="space-y-3">
+                <button
+                  type="button"
+                  onClick={handleGoogleRegisterStart}
+                  disabled={isGoogleBusy}
+                  className="w-full h-11 px-4 rounded-xl bg-white hover:bg-[#f8f9fa] active:bg-[#f1f3f4] border border-[#747775] text-[#1f1f1f] text-sm font-medium transition-colors flex items-center justify-center gap-3 shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {isGoogleBusy ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-600 shrink-0" />
+                  ) : (
+                    <GoogleLogoSvg />
+                  )}
+                  <span>{isGoogleBusy ? 'Connecting Google Account...' : 'Sign up with Google'}</span>
+                </button>
+
+                <div className="relative flex items-center py-0.5">
+                  <div className="flex-grow border-t border-slate-200" />
+                  <span className="shrink-0 mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    or register manually
+                  </span>
+                  <div className="flex-grow border-t border-slate-200" />
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">

@@ -23,7 +23,8 @@ import {
   PlusCircle,
   ExternalLink,
   ChevronRight,
-  UserPlus
+  UserPlus,
+  Mail
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -41,6 +42,7 @@ interface CustomersProps {
   onViewLedger?: (clientId?: number) => void;
   userRole?: 'admin' | 'clerk';
   onOpenFileImport?: () => void;
+  onEmailReminder?: (params: { clientName: string; recipientEmail?: string; amountDue: number }) => void;
 }
 
 export default function Customers({ 
@@ -54,7 +56,8 @@ export default function Customers({
   onDeleteEstimate,
   onViewLedger,
   userRole = 'admin',
-  onOpenFileImport
+  onOpenFileImport,
+  onEmailReminder
 }: CustomersProps) {
   const [search, setSearch] = useState('');
   const [partyFilter, setPartyFilter] = useState<'ALL' | 'DUE' | 'SETTLED'>('ALL');
@@ -66,12 +69,14 @@ export default function Customers({
   // Form inputs for add
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [gstin, setGstin] = useState('');
   const [address, setAddress] = useState('');
 
   // Form inputs for edit
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [editGstin, setEditGstin] = useState('');
   const [editAddress, setEditAddress] = useState('');
 
@@ -129,6 +134,7 @@ export default function Customers({
       id: Date.now(),
       name: name.trim(),
       phone: cleanPhone,
+      email: email.trim() || undefined,
       gstin: gstin.trim().toUpperCase(),
       address: address.trim()
     };
@@ -139,6 +145,7 @@ export default function Customers({
     // Reset Form
     setName('');
     setPhone('');
+    setEmail('');
     setGstin('');
     setAddress('');
   };
@@ -147,6 +154,7 @@ export default function Customers({
     setEditingClient(c);
     setEditName(c.name);
     setEditPhone(c.phone);
+    setEditEmail(c.email || '');
     setEditGstin(c.gstin || '');
     setEditAddress(c.address || '');
     setShowEditClientModal(true);
@@ -171,6 +179,7 @@ export default function Customers({
       ...editingClient,
       name: editName.trim(),
       phone: cleanPhone,
+      email: editEmail.trim() || undefined,
       gstin: editGstin.trim().toUpperCase(),
       address: editAddress.trim()
     };
@@ -453,6 +462,24 @@ export default function Customers({
                           </a>
                         )}
 
+                        {/* Gmail Payment Reminder */}
+                        {onEmailReminder && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onEmailReminder({
+                                clientName: c.name,
+                                recipientEmail: c.email,
+                                amountDue: baki,
+                              })
+                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Send Payment Reminder via Gmail"
+                          >
+                            <Mail className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {/* View Ledger */}
                         {onViewLedger && (
                           <button
@@ -651,6 +678,17 @@ export default function Customers({
               </div>
 
               <div>
+                <label className="block text-[10px] uppercase font-black text-slate-500 mb-1">Email Address (Optional, for Gmail Bills)</label>
+                <input
+                  type="email"
+                  placeholder="e.g. customer@gmail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl font-semibold text-slate-900 outline-none focus:bg-white focus:border-blue-500"
+                />
+              </div>
+
+              <div>
                 <label className="block text-[10px] uppercase font-black text-slate-500 mb-1">GSTIN Number (Optional)</label>
                 <input
                   type="text"
@@ -732,6 +770,17 @@ export default function Customers({
                   onChange={(e) => setEditPhone(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl font-bold text-slate-900 outline-none focus:bg-white focus:border-blue-500 font-mono"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-black text-slate-500 mb-1">Email Address (Optional, for Gmail Bills)</label>
+                <input
+                  type="email"
+                  placeholder="e.g. customer@gmail.com"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl font-semibold text-slate-900 outline-none focus:bg-white focus:border-blue-500"
                 />
               </div>
 

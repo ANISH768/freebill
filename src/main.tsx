@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { DashboardFilterProvider } from './context/DashboardFilterContext.tsx';
+import { CloudAuthProvider } from './context/CloudAuthContext.tsx';
 import { installGlobalTitleCaseListener } from './utils/textFormat.ts';
 import './index.css';
 
@@ -102,9 +103,11 @@ if (rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
       <ErrorBoundary>
-        <DashboardFilterProvider>
-          <App />
-        </DashboardFilterProvider>
+        <CloudAuthProvider>
+          <DashboardFilterProvider>
+            <App />
+          </DashboardFilterProvider>
+        </CloudAuthProvider>
       </ErrorBoundary>
     </StrictMode>,
   );

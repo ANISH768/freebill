@@ -38,6 +38,19 @@ import { pushUserSyncToFirestore, fetchUserSyncFromFirestore, isFirebaseConfigur
 import { isEstimateForClient } from './utils/clientMatching';
 import { isCapsLockActive, setCapsLockActive } from './utils/textFormat';
 import { getPermanentIpForUser, extractPermanentIpFromLocation } from './utils/permanentIp';
+import { useCloudAuth } from './context/CloudAuthContext';
+import GoogleAccountSyncControl from './components/GoogleAccountSyncControl';
+import GmailSendModal from './components/GmailSendModal';
+import {
+  buildBillEmailDraft,
+  buildReminderEmailDraft,
+  type GmailDraftPayload,
+} from './services/gmailService';
+import {
+  fetchCloudBillingSnapshot,
+  pushBulkCloudBillingData,
+  deleteCloudEntity,
+} from './services/cloudSyncApi';
 
 const sanitizeEstimates = (estimates: any[]): Estimate[] => {
   if (!Array.isArray(estimates)) return [];
@@ -336,6 +349,10 @@ export default function App() {
   const [renderKey, setRenderKey] = useState(0);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'synced' | 'saving' | 'offline' | 'error' | null>('synced');
   const [capsLockOn, setCapsLockOn] = useState<boolean>(() => isCapsLockActive());
+  const { cloudUser, getAuthToken } = useCloudAuth();
+  const [isCloudAccountSyncing, setIsCloudAccountSyncing] = useState(false);
+  const [lastCloudAccountSync, setLastCloudAccountSync] = useState<string | null>(null);
+  const lastBootstrappedCloudUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleCapsChange = (e: Event) => {
@@ -594,6 +611,48 @@ export default function App() {
 
   const [showShortcutGuideModal, setShowShortcutGuideModal] = useState<boolean>(false);
   const [showFileDataImportModal, setShowFileDataImportModal] = useState<boolean>(false);
+  const [gmailDraft, setGmailDraft] = useState<GmailDraftPayload | null>(null);
+
+  const findClientEmail = (clientName?: string, clientPhone?: string, clientId?: number): string => {
+    const cleanPhone = (clientPhone || '').replace(/\D/g, '');
+    const cleanName = (clientName || '').trim().toLowerCase();
+    const matched = dbClients.find((c) => {
+      if (clientId && Number(c.id) === Number(clientId)) return true;
+      if (cleanPhone && c.phone && c.phone.replace(/\D/g, '') === cleanPhone) return true;
+      if (cleanName && c.name && c.name.trim().toLowerCase() === cleanName) return true;
+      return false;
+    });
+    return matched?.email || '';
+  };
+
+  const handleOpenGmailBill = (est: Estimate) => {
+    const recipientEmail = findClientEmail(est.clientName, est.clientPhone, est.clientId);
+    setGmailDraft(
+      buildBillEmailDraft({
+        estimate: est,
+        businessName,
+        recipientEmail,
+      })
+    );
+  };
+
+  const handleOpenGmailReminder = (params: {
+    clientName: string;
+    recipientEmail?: string;
+    amountDue: number;
+    billSerial?: string;
+  }) => {
+    const recipientEmail = params.recipientEmail || findClientEmail(params.clientName);
+    setGmailDraft(
+      buildReminderEmailDraft({
+        clientName: params.clientName,
+        businessName,
+        amountDue: params.amountDue,
+        recipientEmail,
+        billSerial: params.billSerial,
+      })
+    );
+  };
 
   const handleTriggerShortcutAction = (actionId: string) => {
     if (actionId === 'new_bill') {
@@ -1306,6 +1365,175 @@ export default function App() {
     } catch (e) {}
   };
 
+  // --- GOOGLE ACCOUNT CLOUD SQL SYNC HELPERS ---
+  const mergeByStableKey = <T,>(localList: T[], cloudList: T[], getKey: (item: T) => string): T[] => {
+    const mergedMap = new Map<string, T>();
+    for (const item of localList) {
+      const k = getKey(item);
+      if (k) mergedMap.set(k, item);
+    }
+    for (const item of cloudList) {
+      const k = getKey(item);
+      if (k) mergedMap.set(k, item);
+    }
+    return Array.from(mergedMap.values());
+  };
+
+  const pushBillingSnapshotToCloudAccount = async (
+    clientsList: Client[],
+    productsList: Product[],
+    estimatesList: Estimate[],
+    stockLogsList: StockLog[],
+    showFeedback = false
+  ): Promise<boolean> => {
+    if (!cloudUser) return false;
+    try {
+      const token = await getAuthToken();
+      if (!token) return false;
+
+      const result = await pushBulkCloudBillingData(token, {
+        businessName,
+        clients: clientsList,
+        products: productsList,
+        estimates: estimatesList,
+        stockLogs: stockLogsList,
+      });
+
+      setLastCloudAccountSync(result.updatedAt || new Date().toISOString());
+      if (showFeedback) {
+        showToast(
+          `Synced ${result.syncedEstimates} bills, ${result.syncedProducts} products, and ${result.syncedClients} customers to your Google account.`
+        );
+      }
+      return true;
+    } catch (err: any) {
+      console.warn('[Cloud Account Sync] Push warning:', err?.message || err);
+      if (showFeedback) {
+        showToast(err?.message || 'Unable to sync local data right now. Please try again.');
+      }
+      return false;
+    }
+  };
+
+  const handleSyncLocalToCloudAccount = async () => {
+    if (!cloudUser) {
+      showToast('Please sign in with Google first to sync your local data.');
+      return;
+    }
+    setIsCloudAccountSyncing(true);
+    try {
+      await pushBillingSnapshotToCloudAccount(
+        dbClients,
+        dbProducts,
+        dbEstimates,
+        dbStockLogs,
+        true
+      );
+    } finally {
+      setIsCloudAccountSyncing(false);
+    }
+  };
+
+  const handlePullFromCloudAccount = async (silent = false) => {
+    if (!cloudUser) return;
+    setIsCloudAccountSyncing(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const snapshot = await fetchCloudBillingSnapshot(token);
+      const hasCloudData =
+        snapshot.clients.length > 0 ||
+        snapshot.products.length > 0 ||
+        snapshot.estimates.length > 0 ||
+        snapshot.stockLogs.length > 0;
+
+      if (hasCloudData) {
+        const mergedClients = mergeByStableKey(
+          dbClients,
+          snapshot.clients,
+          (c) => String(c.id || c.name.trim().toLowerCase())
+        );
+        const mergedProducts = mergeByStableKey(
+          dbProducts,
+          snapshot.products,
+          (p) => String(p.id || p.sku || p.name.trim().toLowerCase())
+        );
+        const mergedEstimates = filterDeletedEstimates(
+          sanitizeEstimates(
+            mergeByStableKey(
+              dbEstimates,
+              snapshot.estimates,
+              (e) => String(e.id || e.serial.trim().toLowerCase())
+            )
+          ),
+          currentUser
+        );
+        const mergedStockLogs = mergeByStableKey(
+          dbStockLogs,
+          snapshot.stockLogs,
+          (l) => String(l.id || `${l.productId}_${l.date}_${l.reference}`)
+        );
+
+        setDbClients(mergedClients);
+        setDbProducts(mergedProducts);
+        setDbEstimates(mergedEstimates);
+        setDbStockLogs(mergedStockLogs);
+
+        if (snapshot.businessName && (!businessName || businessName === 'My Offline Counter')) {
+          setBusinessName(snapshot.businessName);
+        }
+
+        if (currentUser) {
+          try {
+            safeStorage.setItem(getClientsKey(currentUser), JSON.stringify(mergedClients));
+            safeStorage.setItem(`off_clients_${currentUser}`, JSON.stringify(mergedClients));
+            safeStorage.setItem(getProductsKey(currentUser), JSON.stringify(mergedProducts));
+            safeStorage.setItem(`off_products_${currentUser}`, JSON.stringify(mergedProducts));
+            safeStorage.setItem(getEstimatesKey(currentUser), JSON.stringify(mergedEstimates));
+            safeStorage.setItem(`off_estimates_${currentUser}`, JSON.stringify(mergedEstimates));
+            safeStorage.setItem(getStockLogsKey(currentUser), JSON.stringify(mergedStockLogs));
+            safeStorage.setItem(`off_stock_logs_${currentUser}`, JSON.stringify(mergedStockLogs));
+            saveUserIsolatedData(currentUser, {
+              clients: mergedClients,
+              products: mergedProducts,
+              estimates: mergedEstimates,
+              stockLogs: mergedStockLogs,
+              businessName: snapshot.businessName || businessName,
+              lastMutationTime: Date.now(),
+            });
+          } catch {}
+        }
+
+        setLastCloudAccountSync(new Date().toISOString());
+        setRenderKey((prev) => prev + 1);
+        showToast(
+          `Loaded ${snapshot.estimates.length} bills, ${snapshot.products.length} products, and ${snapshot.clients.length} customers from your Google account.`
+        );
+      } else if (!silent) {
+        showToast('No cloud records found yet. Click "Sync Local Data" to upload your current records.');
+      }
+    } catch (err: any) {
+      console.warn('[Cloud Account Sync] Pull warning:', err?.message || err);
+      if (!silent) {
+        showToast(err?.message || 'Unable to load cloud account data.');
+      }
+    } finally {
+      setIsCloudAccountSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!cloudUser) {
+      lastBootstrappedCloudUidRef.current = null;
+      return;
+    }
+    if (!currentUser) return;
+    if (lastBootstrappedCloudUidRef.current === cloudUser.uid) return;
+    lastBootstrappedCloudUidRef.current = cloudUser.uid;
+    void handlePullFromCloudAccount(true);
+  }, [cloudUser?.uid, currentUser]);
+
   // Synchronous force cloud save helper
   const forceCloudSaveSynchronous = async (
     updatedClients: Client[],
@@ -1352,6 +1580,16 @@ export default function App() {
         costFallbackPct,
         last_synced_millis: now
       }).catch(err => console.warn('[Firestore] forceCloudSave push warning:', err));
+    }
+
+    if (cloudUser) {
+      void pushBillingSnapshotToCloudAccount(
+        updatedClients,
+        updatedProducts,
+        updatedEstimates,
+        updatedStockLogs || dbStockLogs,
+        false
+      );
     }
 
     try {
@@ -1520,6 +1758,16 @@ export default function App() {
         costFallbackPct,
         last_synced_millis: now
       }).catch(err => console.warn('[Firestore] Auto-save push warning:', err));
+    }
+
+    if (cloudUser) {
+      void pushBillingSnapshotToCloudAccount(
+        updatedClients,
+        updatedProducts,
+        updatedEstimates,
+        activeLogs,
+        false
+      );
     }
 
     try {
@@ -2363,6 +2611,11 @@ export default function App() {
     saveClientsToAllStorage(updated);
     registerLocalMutation();
     triggerAutomaticCloudSave(updated, dbProducts, dbEstimates);
+    if (cloudUser) {
+      getAuthToken().then((token) => {
+        if (token) void deleteCloudEntity(token, 'client', id).catch(() => {});
+      }).catch(() => {});
+    }
     showToast("Customer deleted successfully!");
   };
 
@@ -2476,6 +2729,11 @@ export default function App() {
 
     registerLocalMutation();
     triggerAutomaticCloudSave(dbClients, updated, dbEstimates, updatedLogs);
+    if (cloudUser) {
+      getAuthToken().then((token) => {
+        if (token) void deleteCloudEntity(token, 'product', id).catch(() => {});
+      }).catch(() => {});
+    }
     showToast("Product deleted successfully!");
   };
 
@@ -2566,9 +2824,15 @@ export default function App() {
       if (!item || !item.name) return;
       
       const cleanItemName = String(item.name).trim();
+      const cleanItemSku = String(item.sku || '').trim().toLowerCase();
       if (!cleanItemName) return;
 
-      const matchedIdx = currentProducts.findIndex(p => p && p.name && p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
+      const matchedIdx = currentProducts.findIndex(
+        (p) =>
+          p &&
+          ((p.name && p.name.trim().toLowerCase() === cleanItemName.toLowerCase()) ||
+            (cleanItemSku && p.sku && p.sku.trim().toLowerCase() === cleanItemSku))
+      );
       if (matchedIdx >= 0) {
         const prevStock = currentProducts[matchedIdx].stock || 0;
         const addedQty = Number(item.stock || 0);
@@ -2639,6 +2903,9 @@ export default function App() {
     try {
       const storageKey = currentUser ? `off_products_${currentUser}` : 'off_products';
       safeStorage.setItem(storageKey, JSON.stringify(currentProducts));
+      if (currentUser) {
+        safeStorage.setItem(getProductsKey(currentUser), JSON.stringify(currentProducts));
+      }
     } catch (e) {}
 
     let updatedLogs = dbStockLogs;
@@ -2648,6 +2915,9 @@ export default function App() {
       try {
         const stockLogsKey = `off_stock_logs_${currentUser}`;
         safeStorage.setItem(stockLogsKey, JSON.stringify(updatedLogs));
+        if (currentUser) {
+          safeStorage.setItem(getStockLogsKey(currentUser), JSON.stringify(updatedLogs));
+        }
       } catch (e) {}
     }
 
@@ -3543,6 +3813,11 @@ export default function App() {
 
     // Permanently overwrite Server & Firestore Cloud Sync with force: true so even deleting the last bill succeeds
     await forceCloudSaveSynchronous(dbClients, updatedProductsList, updatedEstimates, updatedLogs, true);
+    if (cloudUser) {
+      getAuthToken().then((token) => {
+        if (token) void deleteCloudEntity(token, 'estimate', id).catch(() => {});
+      }).catch(() => {});
+    }
 
     showToast(`Bill ${matchedEst.serial} permanently deleted & stock restored!`);
   };
@@ -4035,6 +4310,8 @@ export default function App() {
               isMobile={true}
               businessName={businessName}
               userRole={currentUserRole}
+              onEmailBill={handleOpenGmailBill}
+              onEmailReminder={handleOpenGmailReminder}
             />
           )}
 
@@ -4219,6 +4496,7 @@ export default function App() {
               onDeleteEstimate={handleDeleteEstimate}
               userRole={currentUserRole}
               onOpenFileImport={() => setShowFileDataImportModal(true)}
+              onEmailReminder={handleOpenGmailReminder}
             />
           )}
 
@@ -4240,6 +4518,7 @@ export default function App() {
                   setEditingEstimateId(id);
                   navigateToTab('create_estimate');
                 }}
+                onEmailReminder={handleOpenGmailReminder}
               />
             </div>
           )}
@@ -4260,6 +4539,11 @@ export default function App() {
                 onForceDownload={() => handleResolveConflict('server')}
                 onOpenPrintCustomizer={() => navigateToTab('print_customizer')}
                 onOpenFileImport={() => setShowFileDataImportModal(true)}
+                stockLogsCount={dbStockLogs.length}
+                isCloudAccountSyncing={isCloudAccountSyncing}
+                lastCloudAccountSync={lastCloudAccountSync}
+                onSyncLocalToCloudAccount={handleSyncLocalToCloudAccount}
+                onPullFromCloudAccount={() => void handlePullFromCloudAccount(false)}
               />
             </div>
           )}
@@ -4580,6 +4864,19 @@ export default function App() {
                         💬 Send Professional WhatsApp Reminder
                       </a>
                       <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenGmailReminder({
+                            clientName: selectedLedgerClient.name,
+                            recipientEmail: selectedLedgerClient.email,
+                            amountDue: totalBalanceDue,
+                          })
+                        }
+                        className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-wider py-3 rounded-xl transition-all block text-center shadow-sm cursor-pointer"
+                      >
+                        Email Payment Reminder via Gmail
+                      </button>
+                      <button
                         onClick={() => setSelectedLedgerClient(null)}
                         className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs py-3 rounded-xl cursor-pointer transition-colors text-center block"
                       >
@@ -4621,6 +4918,12 @@ export default function App() {
           isOpen={showShortcutGuideModal}
           onClose={() => setShowShortcutGuideModal(false)}
           onTriggerShortcut={handleTriggerShortcutAction}
+        />
+        <GmailSendModal
+          draft={gmailDraft}
+          businessName={businessName}
+          onClose={() => setGmailDraft(null)}
+          onSentSuccess={(msg) => showToast(msg)}
         />
         <FileDataImportModal
           isOpen={showFileDataImportModal}
@@ -5051,6 +5354,19 @@ export default function App() {
               </button>
             )}
 
+            <GoogleAccountSyncControl
+              variant="header"
+              isSyncing={isCloudAccountSyncing}
+              lastSyncedAt={lastCloudAccountSync}
+              localRecordCount={{
+                bills: dbEstimates.length,
+                products: dbProducts.length,
+                clients: dbClients.length,
+                stockLogs: dbStockLogs.length,
+              }}
+              onSyncLocalData={handleSyncLocalToCloudAccount}
+            />
+
             <button
               type="button"
               onClick={() => {
@@ -5173,6 +5489,8 @@ export default function App() {
             userRole={currentUserRole}
             isMobile={false}
             businessName={businessName}
+            onEmailBill={handleOpenGmailBill}
+            onEmailReminder={handleOpenGmailReminder}
           />
         )}
 
@@ -5241,6 +5559,7 @@ export default function App() {
             onDeleteEstimate={handleDeleteEstimate}
             userRole={currentUserRole}
             onOpenFileImport={() => setShowFileDataImportModal(true)}
+            onEmailReminder={handleOpenGmailReminder}
           />
         )}
 
@@ -5262,6 +5581,7 @@ export default function App() {
               setEditingEstimateId(id);
               navigateToTab('create_estimate');
             }}
+            onEmailReminder={handleOpenGmailReminder}
           />
         )}
 
@@ -5308,6 +5628,11 @@ export default function App() {
             }}
             onOpenPrintCustomizer={() => navigateToTab('print_customizer')}
             onOpenFileImport={() => setShowFileDataImportModal(true)}
+            stockLogsCount={dbStockLogs.length}
+            isCloudAccountSyncing={isCloudAccountSyncing}
+            lastCloudAccountSync={lastCloudAccountSync}
+            onSyncLocalToCloudAccount={handleSyncLocalToCloudAccount}
+            onPullFromCloudAccount={() => void handlePullFromCloudAccount(false)}
           />
         )}
 
@@ -5490,6 +5815,13 @@ export default function App() {
         </div>,
         document.body
       )}
+
+      <GmailSendModal
+        draft={gmailDraft}
+        businessName={businessName}
+        onClose={() => setGmailDraft(null)}
+        onSentSuccess={(msg) => showToast(msg)}
+      />
 
     </div>
   );

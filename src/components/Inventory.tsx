@@ -1,6 +1,6 @@
 import { useState, FormEvent, useRef, useEffect, useMemo } from 'react';
 import { Product, StockLog } from '../types';
-import { Search, Plus, Sparkles, Layers, Box, Keyboard, FileDown, Eye, Image as ImageIcon, Loader2, CheckCircle2, AlertCircle, Trash2, UploadCloud, Barcode, Printer, Download } from 'lucide-react';
+import { Search, Plus, Sparkles, Layers, Box, Keyboard, FileDown, Eye, Image as ImageIcon, Loader2, CheckCircle2, AlertCircle, Trash2, UploadCloud, Barcode, Printer, Download, Camera } from 'lucide-react';
 
 const CODE39_MAP: Record<string, string> = {
   '0': '101001101101',
@@ -170,6 +170,8 @@ export default function Inventory({
   // AI Batch Scan States
   const [showBatchScanModal, setShowBatchScanModal] = useState(false);
   const [batchWarning, setBatchWarning] = useState<string | null>(null);
+  const [confirmCloseScanner, setConfirmCloseScanner] = useState(false);
+  const [isDragOverBatch, setIsDragOverBatch] = useState(false);
   interface BatchFileState {
     id: string;
     fileName: string;
@@ -278,11 +280,10 @@ export default function Inventory({
       }
       
       try {
-        const customApiKey = localStorage.getItem("custom_gemini_api_key") || "";
         const res = await fetch("/api/scan-bill", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: base64, customApiKey })
+          body: JSON.stringify({ image: base64 })
         });
         
         if (!res.ok) {
@@ -350,14 +351,16 @@ export default function Inventory({
   const handleCommitBatchProducts = () => {
     const validItems = batchScanExtractedProducts.filter(p => p && p.name && String(p.name).trim() !== '');
     if (validItems.length === 0) {
-      alert("No valid products with a name are loaded to save!");
+      setBatchWarning("No valid products with a name are loaded to save.");
       return;
     }
-    
+
     if (onBatchAddProducts) {
       onBatchAddProducts(validItems);
     }
-    
+
+    setBatchWarning(null);
+    setConfirmCloseScanner(false);
     setBatchFiles([]);
     setBatchScanExtractedProducts([]);
     setShowBatchScanModal(false);
@@ -603,8 +606,22 @@ export default function Inventory({
           
           <button
             type="button"
+            onClick={() => {
+              setBatchWarning(null);
+              setConfirmCloseScanner(false);
+              setShowBatchScanModal(true);
+            }}
+            className="flex-1 md:flex-none justify-center bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            title="Upload purchase bill photos or PDFs to automatically extract and add stock"
+          >
+            <Camera className="w-4 h-4 shrink-0" />
+            <span>Scan Photo / PDF</span>
+          </button>
+
+          <button
+            type="button"
             onClick={openBulkSpreadsheet}
-            className="flex-1 md:flex-none justify-center bg-[#eff6ff] hover:bg-blue-100 border border-blue-200 text-[#2563eb] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
+            className="flex-1 md:flex-none justify-center bg-[#eff6ff] hover:bg-blue-100 border border-blue-200 text-[#2563eb] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap shrink-0"
           >
             <Keyboard className="w-4 h-4" />
             <span>Excel Bulk Add</span>
@@ -613,7 +630,7 @@ export default function Inventory({
           <button
             type="button"
             onClick={() => setShowAddProdModal(true)}
-            className="flex-1 md:flex-none justify-center bg-[#2563eb] hover:bg-blue-700 text-white font-extrabold py-2.5 px-5 rounded-xl text-xs shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
+            className="flex-1 md:flex-none justify-center bg-[#2563eb] hover:bg-blue-700 text-white font-extrabold py-2.5 px-5 rounded-xl text-xs shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
             style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
             <Plus className="w-4 h-4" />
@@ -976,6 +993,25 @@ export default function Inventory({
               <Box className="w-5 h-5 text-blue-600" />
               <span>Register New Product</span>
             </h3>
+
+            <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5">
+              <div className="text-[11px] text-slate-600 font-medium leading-snug">
+                Have a supplier bill photo or PDF? Extract all items at once.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddProdModal(false);
+                  setBatchWarning(null);
+                  setConfirmCloseScanner(false);
+                  setShowBatchScanModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Camera className="w-3.5 h-3.5 shrink-0" />
+                <span>Scan Photo / PDF</span>
+              </button>
+            </div>
 
             <div className="space-y-3.5 text-xs">
               <div>
@@ -1685,56 +1721,89 @@ export default function Inventory({
       )}
 
 
-      {/* ----------------- MODAL: AI BATCH SCANNER (MAX 50 PHOTOS) ----------------- */}
+      {/* ----------------- MODAL: AI BATCH SCANNER (MAX 50 PHOTOS / PDFs) ----------------- */}
       {showBatchScanModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 z-50 no-print">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl text-slate-100 overflow-hidden">
             
             {/* Header */}
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between flex-shrink-0 bg-slate-950/40">
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between gap-4 flex-shrink-0 bg-slate-950/40">
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-purple-950/80 rounded-xl text-purple-400 border border-purple-900/50">
-                  <ImageIcon className="w-5 h-5 animate-pulse" />
+                <div className="p-2.5 bg-blue-950/80 rounded-xl text-blue-400 border border-blue-900/60">
+                  <Camera className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-black text-white text-base">AI Multi-Photo & PDF Batch Stock Scanner</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">एक साथ 50 फोटो या पीडीएफ तक अपलोड करके सारे स्टॉक और आइटम्स को एआई से स्कैन करें।</p>
+                  <h3 className="font-bold text-white text-base">Photo &amp; PDF Purchase Bill Stock Scanner</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">एक साथ 50 फोटो या पीडीएफ बिल अपलोड करके सभी प्रोडक्ट्स और स्टॉक सीधे इन्वेंटरी में जोड़ें।</p>
                 </div>
               </div>
               
               <button 
+                type="button"
                 onClick={() => {
                   if (isBatchScanning) {
-                    if (!confirm("Scanning is in progress! Do you want to stop and close?")) return;
+                    setConfirmCloseScanner(true);
+                    return;
                   }
+                  setConfirmCloseScanner(false);
                   setShowBatchScanModal(false);
                 }}
                 className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+                aria-label="Close scanner"
               >
                 ✕
               </button>
             </div>
 
+            {confirmCloseScanner && isBatchScanning && (
+              <div className="px-6 py-3 bg-amber-950/70 border-b border-amber-800/60 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-200">
+                <span className="font-semibold">Scanning is currently in progress. Close this window anyway?</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCloseScanner(false)}
+                    className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer"
+                  >
+                    Keep Scanning
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmCloseScanner(false);
+                      setShowBatchScanModal(false);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                  >
+                    Close Window
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Main Content Areas */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               
               {/* Top Queue Bar & Actions */}
-              <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-400 font-bold">BATCH QUEUE STATUS</div>
-                  <div className="text-sm font-black text-slate-200 flex items-center gap-2">
-                    <span>Selected: {batchFiles.length} / 50 Files</span>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs text-slate-400 font-semibold">
+                    <span>Batch Queue</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono tabular-nums text-slate-200 font-bold">{batchFiles.length} / 50 files</span>
                     {isBatchScanning && (
-                      <span className="text-purple-400 animate-pulse flex items-center gap-1 text-xs font-semibold bg-purple-950/60 border border-purple-900 px-2.5 py-0.5 rounded-full">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Scanning index {currentScanningIndex + 1}...
-                      </span>
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-blue-400 inline-flex items-center gap-1 font-semibold">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Scanning file {currentScanningIndex + 1} of {batchFiles.length}
+                        </span>
+                      </>
                     )}
                   </div>
                   {/* Progress bar */}
-                  <div className="w-full md:w-80 bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
+                  <div className="w-full md:w-80 bg-slate-800 h-2 rounded-full overflow-hidden">
                     <div 
-                      className="bg-purple-500 h-full transition-all duration-300 rounded-full"
+                      className="bg-blue-500 h-full transition-all duration-300 rounded-full"
                       style={{ 
                         width: `${batchFiles.length > 0 
                           ? (batchFiles.filter(f => f.status === 'success' || f.status === 'failed').length / batchFiles.length) * 100 
@@ -1743,33 +1812,32 @@ export default function Inventory({
                     ></div>
                   </div>
                   {batchWarning && (
-                    <div className="text-[11px] text-amber-400 font-semibold mt-1">
-                      ⚠️ {batchWarning}
+                    <div className="text-[11px] text-amber-400 font-semibold pt-1">
+                      {batchWarning}
                     </div>
                   )}
                   {batchFiles.filter(f => f.status === 'failed').length > 0 && (
-                    <div className="bg-red-950/40 border border-red-900/60 p-3 rounded-xl mt-3 text-xs max-w-xl text-red-300">
+                    <div className="bg-red-950/40 border border-red-900/60 p-3 rounded-xl mt-2 text-xs max-w-xl text-red-300">
                       <div className="font-bold flex items-center gap-1.5 mb-1 text-red-200">
-                        <AlertCircle className="w-4 h-4 text-red-450" />
-                        <span>{batchFiles.filter(f => f.status === 'failed').length} Files Failed to Scan</span>
+                        <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>{batchFiles.filter(f => f.status === 'failed').length} file(s) failed to scan</span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-300">
-                        They might have hit server rate limits or experienced transient connection issues. 
-                        Clicking the <b>🚀 Start AI Scan</b> button again will automatically retry only the failed files.
+                        Click <b>Start Scan</b> again to automatically retry only the failed files without re-scanning completed ones.
                       </p>
                       {Array.from(new Set(batchFiles.filter(f => f.status === 'failed' && f.error).map(f => f.error!))).length > 0 && (
-                        <div className="mt-1.5 border-t border-red-900/40 pt-1.5 text-[10px] font-mono text-red-400/95 leading-normal">
-                          Error Details: {Array.from(new Set(batchFiles.filter(f => f.status === 'failed' && f.error).map(f => f.error!))).join("; ")}
+                        <div className="mt-1.5 border-t border-red-900/40 pt-1.5 text-[10px] font-mono text-red-300 leading-normal">
+                          {Array.from(new Set(batchFiles.filter(f => f.status === 'failed' && f.error).map(f => f.error!))).join("; ")}
                         </div>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="flex gap-2 w-full md:w-auto text-xs">
-                  <label className="flex-1 md:flex-none justify-center bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 font-bold py-3 px-4 rounded-xl flex items-center space-x-1.5 cursor-pointer transition-colors">
-                    <UploadCloud className="w-4 h-4 text-slate-400" />
-                    <span>+ Add Photos/PDFs</span>
+                <div className="flex flex-wrap gap-2 w-full md:w-auto text-xs">
+                  <label className="flex-1 md:flex-none justify-center bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-100 font-bold py-2.5 px-4 rounded-xl flex items-center space-x-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0">
+                    <UploadCloud className="w-4 h-4 text-slate-300" />
+                    <span>+ Add Photos / PDFs</span>
                     <input 
                       type="file" 
                       accept="image/*,application/pdf" 
@@ -1786,46 +1854,73 @@ export default function Inventory({
                   </label>
 
                   <button
+                    type="button"
                     onClick={startBatchScanning}
-                    disabled={isBatchScanning || batchFiles.length === 0}
-                    className="flex-1 md:flex-none justify-center bg-purple-600 hover:bg-purple-700 disabled:opacity-55 text-white font-black py-3 px-6 rounded-xl flex items-center space-x-2 transition-all hover:shadow-lg shadow-purple-900/20 cursor-pointer"
+                    disabled={isBatchScanning || batchFiles.length === 0 || batchFiles.filter(f => f.status !== 'success').length === 0}
+                    className="flex-1 md:flex-none justify-center bg-[#2563eb] hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 px-5 rounded-xl flex items-center space-x-2 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
                     {isBatchScanning ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin text-purple-200" />
-                        <span>AI Scanning...</span>
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
+                        <span>Scanning Bills...</span>
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-4 h-4 text-purple-200 animate-pulse" />
-                        <span>🚀 Start AI Scan ({batchFiles.filter(f => f.status !== 'success').length} pending)</span>
+                        <Sparkles className="w-4 h-4 text-blue-200" />
+                        <span>Start Scan ({batchFiles.filter(f => f.status !== 'success').length} pending)</span>
                       </>
                     )}
                   </button>
                 </div>
               </div>
 
-              {/* Grid of uploaded images / files */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Files Queue ( thumbnails )</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+              {/* Grid of uploaded images / PDFs with Drag & Drop */}
+              <div
+                className="space-y-2"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!isBatchScanning) setIsDragOverBatch(true);
+                }}
+                onDragLeave={() => setIsDragOverBatch(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragOverBatch(false);
+                  if (!isBatchScanning && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleBatchFileSelection(e.dataTransfer.files);
+                  }
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-slate-400">Queued Bills (Images &amp; PDFs)</h4>
+                  {batchFiles.length > 0 && !isBatchScanning && (
+                    <button
+                      type="button"
+                      onClick={() => setBatchFiles([])}
+                      className="text-[11px] text-slate-400 hover:text-red-400 font-semibold cursor-pointer"
+                    >
+                      Clear Queue
+                    </button>
+                  )}
+                </div>
+
+                <div className={`grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 rounded-2xl transition-colors ${isDragOverBatch ? 'ring-2 ring-blue-500 bg-blue-950/20 p-2' : ''}`}>
                   {batchFiles.map((file, idx) => (
                     <div key={file.id} className="relative group aspect-square rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex flex-col justify-between">
                       {/* Thumbnail preview */}
                       {file.isPdf ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-2 text-center select-none opacity-80">
-                          <div className="p-2 bg-red-950/80 rounded-lg text-red-450 border border-red-900/40 mb-1.5 flex items-center justify-center">
-                            <span className="text-[10px] font-black tracking-widest font-mono text-red-400">PDF</span>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-2 text-center select-none">
+                          <div className="px-2 py-1 bg-red-950/80 rounded-md border border-red-900/50 mb-1.5">
+                            <span className="text-[10px] font-bold font-mono text-red-400">PDF</span>
                           </div>
-                          <span className="text-[9px] text-slate-400 line-clamp-2 px-1 break-all leading-tight">
+                          <span className="text-[9px] text-slate-300 line-clamp-2 px-1 break-all leading-tight">
                             {file.fileName}
                           </span>
                         </div>
                       ) : (
                         <img 
                           src={file.previewUrl} 
-                          alt="bill pic" 
-                          className="absolute inset-0 w-full h-full object-cover opacity-60"
+                          alt={file.fileName} 
+                          className="absolute inset-0 w-full h-full object-cover opacity-70"
                           referrerPolicy="no-referrer"
                         />
                       )}
@@ -1835,44 +1930,44 @@ export default function Inventory({
 
                       {/* Top bar with index and remove button */}
                       <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between">
-                        <span className="text-[9px] bg-slate-900/90 text-slate-300 px-1.5 py-0.5 rounded font-mono font-bold">
+                        <span className="text-[9px] bg-slate-900/90 text-slate-300 px-1.5 py-0.5 rounded font-mono tabular-nums font-bold">
                           #{idx + 1}
                         </span>
                         {!isBatchScanning && (
                           <button 
+                            type="button"
                             onClick={() => handleRemoveBatchFile(file.id)}
                             className="w-5 h-5 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center text-[10px] shadow-md cursor-pointer transition-transform group-hover:scale-110"
+                            aria-label={`Remove ${file.fileName}`}
                           >
                             ✕
                           </button>
                         )}
                       </div>
 
-                      {/* Status indicator badge */}
+                      {/* Status indicator */}
                       <div className="absolute bottom-1.5 left-1.5 right-1.5">
                         {file.status === 'pending' && (
-                          <div className="text-[9px] bg-slate-900/95 text-slate-400 py-1 px-1.5 rounded-lg text-center font-bold tracking-wide uppercase border border-slate-800">
-                            Waiting
+                          <div className="text-[9px] bg-slate-900/95 text-slate-300 py-1 px-1.5 rounded-lg text-center font-semibold border border-slate-800">
+                            Pending
                           </div>
                         )}
                         {file.status === 'scanning' && (
-                          <div className="text-[9px] bg-purple-950/95 text-purple-300 py-1 px-1.5 rounded-lg text-center font-bold tracking-wide uppercase border border-purple-900 flex items-center justify-center gap-1 animate-pulse">
-                            <Loader2 className="w-2.5 h-2.5 animate-spin text-purple-400" />
+                          <div className="text-[9px] bg-blue-950/95 text-blue-300 py-1 px-1.5 rounded-lg text-center font-semibold border border-blue-900 flex items-center justify-center gap-1">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin text-blue-400" />
                             Scanning
                           </div>
                         )}
                         {file.status === 'success' && (
-                          <div className="text-[9px] bg-emerald-950/95 text-emerald-300 py-1 px-1.5 rounded-lg text-center font-bold tracking-wide uppercase border border-emerald-900 flex items-center justify-center gap-1">
-                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-450" />
-                            +{file.itemsFoundCount} Items
+                          <div className="text-[9px] bg-emerald-950/95 text-emerald-300 py-1 px-1.5 rounded-lg text-center font-semibold border border-emerald-900 flex items-center justify-center gap-1 font-mono tabular-nums">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                            +{file.itemsFoundCount} items
                           </div>
                         )}
                         {file.status === 'failed' && (
-                          <div className="text-[9px] bg-red-950/95 text-red-300 py-1 px-1.5 rounded-lg text-center font-bold tracking-wide uppercase border border-red-905 flex flex-col items-center justify-center" title={file.error}>
-                            <div className="flex items-center gap-1">
-                              <AlertCircle className="w-2.5 h-2.5 text-red-400" />
-                              Error
-                            </div>
+                          <div className="text-[9px] bg-red-950/95 text-red-300 py-1 px-1.5 rounded-lg text-center font-semibold border border-red-900 flex items-center justify-center gap-1" title={file.error}>
+                            <AlertCircle className="w-2.5 h-2.5 text-red-400" />
+                            Failed
                           </div>
                         )}
                       </div>
@@ -1880,11 +1975,24 @@ export default function Inventory({
                   ))}
 
                   {batchFiles.length === 0 && (
-                    <div className="col-span-full py-10 bg-slate-950/40 border-2 border-dashed border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center p-4">
-                      <ImageIcon className="w-10 h-10 text-slate-600 mb-2.5" />
-                      <div className="text-slate-400 text-xs font-bold">No Photos or PDFs Loaded in Queue</div>
-                      <p className="text-[10px] text-slate-500 max-w-xs mt-1">Click the button above to upload up to 50 photos or PDFs of purchase invoices, packing slips, or bills.</p>
-                    </div>
+                    <label className="col-span-full py-10 bg-slate-950/40 hover:bg-slate-950/60 border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl flex flex-col items-center justify-center text-center p-4 cursor-pointer transition-colors">
+                      <UploadCloud className="w-9 h-9 text-slate-500 mb-2.5" />
+                      <div className="text-slate-200 text-xs font-bold">Drop purchase bill photos or PDFs here, or click to browse</div>
+                      <p className="text-[11px] text-slate-400 max-w-md mt-1">Supports JPEG, PNG, WebP images and PDF invoices (up to 50 files per batch).</p>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        multiple
+                        disabled={isBatchScanning}
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            handleBatchFileSelection(e.target.files);
+                            e.target.value = '';
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
                   )}
                 </div>
               </div>
@@ -1892,11 +2000,12 @@ export default function Inventory({
               {/* Detected Items spreadsheet */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Detected Products & Stock Updates ({batchScanExtractedProducts.length})</h4>
+                  <h4 className="text-xs font-semibold text-slate-400">Extracted Products &amp; Stock Updates ({batchScanExtractedProducts.length})</h4>
                   {batchScanExtractedProducts.length > 0 && (
                     <button
+                      type="button"
                       onClick={() => setBatchScanExtractedProducts([])}
-                      className="text-[10px] text-red-450 hover:text-red-400 font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                      className="text-[11px] text-red-400 hover:text-red-300 font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       Clear Extracted List
@@ -1908,47 +2017,56 @@ export default function Inventory({
                   <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950">
                     <div className="overflow-x-auto max-h-[45vh]">
                       <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-bold text-[10px] sticky top-0 z-10 border-b border-slate-800/80">
+                        <thead className="bg-slate-900/90 text-slate-400 font-semibold text-[11px] sticky top-0 z-10 border-b border-slate-800">
                           <tr>
-                            <th className="p-3">Product Name (एआई नाम)</th>
+                            <th className="p-3">Product Name</th>
                             <th className="p-3 w-40">SKU Code</th>
                             <th className="p-3 w-28 text-center">Unit</th>
-                            <th className="p-3 w-32 text-center">Stock to Add</th>
-                            <th className="p-3 w-32 text-right">Sale Price</th>
-                            <th className="p-3 w-32 text-right">Cost Rate</th>
-                            <th className="p-3 w-32 text-right">MRP Price</th>
-                            <th className="p-3 w-28 text-center">Discount (%)</th>
-                            <th className="p-3 w-28 text-center">Merge Type</th>
-                            <th className="p-3 w-16 text-center">✕</th>
+                            <th className="p-3 w-28 text-center">Add Qty</th>
+                            <th className="p-3 w-28 text-right">Sale Price</th>
+                            <th className="p-3 w-28 text-right">Cost Rate</th>
+                            <th className="p-3 w-28 text-right">MRP</th>
+                            <th className="p-3 w-24 text-center">Disc (%)</th>
+                            <th className="p-3 w-40 text-left">Inventory Action</th>
+                            <th className="p-3 w-12 text-center">✕</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/60 font-medium">
                           {batchScanExtractedProducts.map((p) => {
-                            const matchedProduct = products.find(existing => existing.name.trim().toLowerCase() === p.name.trim().toLowerCase());
+                            const cleanName = String(p.name || '').trim().toLowerCase();
+                            const cleanSku = String(p.sku || '').trim().toLowerCase();
+                            const matchedProduct = products.find(
+                              (existing) =>
+                                (cleanName && existing.name.trim().toLowerCase() === cleanName) ||
+                                (cleanSku && existing.sku && existing.sku.trim().toLowerCase() === cleanSku)
+                            );
+                            const qtyToAdd = Number(p.stock || 0);
+                            const projectedStock = matchedProduct ? (matchedProduct.stock || 0) + qtyToAdd : qtyToAdd;
+
                             return (
-                              <tr key={p.tempId} className="hover:bg-slate-900/30 transition-colors">
+                              <tr key={p.tempId} className="hover:bg-slate-900/40 transition-colors">
                                 <td className="p-2.5">
                                   <input 
                                     type="text" 
                                     value={p.name}
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'name', e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-bold text-white outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-bold text-white outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5">
                                   <input 
                                     type="text" 
                                     value={p.sku || ''}
-                                    placeholder="Auto-sku"
+                                    placeholder="Auto-SKU"
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'sku', e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-slate-300 outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono text-slate-300 outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5 text-center">
                                   <select
                                     value={p.unit || 'Pcs'}
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'unit', e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-bold text-slate-200 outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-bold text-slate-200 outline-none"
                                   >
                                     <option value="Pcs">Pcs</option>
                                     <option value="Bags">Bags</option>
@@ -1961,8 +2079,8 @@ export default function Inventory({
                                   <input 
                                     type="number" 
                                     value={p.stock}
-                                    onChange={(e) => handleEditExtractedField(p.tempId, 'stock', parseInt(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-center text-amber-300 font-bold outline-none"
+                                    onChange={(e) => handleEditExtractedField(p.tempId, 'stock', parseFloat(e.target.value) || 0)}
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono tabular-nums text-center text-amber-300 font-bold outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5">
@@ -1971,7 +2089,7 @@ export default function Inventory({
                                     value={p.price || ''}
                                     placeholder="0"
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'price', parseFloat(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-right text-emerald-400 font-black outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono tabular-nums text-right text-emerald-400 font-bold outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5">
@@ -1980,7 +2098,7 @@ export default function Inventory({
                                     value={p.purchasePrice || p.costPrice || ''}
                                     placeholder="0"
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'purchasePrice', parseFloat(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-right text-teal-400 font-semibold outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono tabular-nums text-right text-sky-300 font-semibold outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5">
@@ -1989,7 +2107,7 @@ export default function Inventory({
                                     value={p.mrp || ''}
                                     placeholder="0"
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'mrp', parseFloat(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-right text-slate-300 outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono tabular-nums text-right text-slate-300 outline-none"
                                   />
                                 </td>
                                 <td className="p-2.5">
@@ -1998,24 +2116,26 @@ export default function Inventory({
                                     value={p.discount !== undefined ? p.discount : 0}
                                     placeholder="0"
                                     onChange={(e) => handleEditExtractedField(p.tempId, 'discount', parseFloat(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg p-2 font-mono text-center text-amber-450 font-bold outline-none"
+                                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2 font-mono tabular-nums text-center text-amber-400 font-bold outline-none"
                                   />
                                 </td>
-                                <td className="p-2.5 text-center">
+                                <td className="p-2.5 text-left whitespace-nowrap">
                                   {matchedProduct ? (
-                                    <span className="inline-block text-[9px] bg-blue-950 text-blue-400 font-black px-2 py-0.5 rounded border border-blue-900 uppercase tracking-wider" title={`Existing Product Stock: ${matchedProduct.stock}`}>
-                                      📈 Stock ({matchedProduct.stock})
-                                    </span>
+                                    <div className="text-[11px] font-mono tabular-nums text-blue-300 font-semibold" title={`Current stock: ${matchedProduct.stock}`}>
+                                      Existing · {matchedProduct.stock} + {qtyToAdd} → <span className="text-white font-bold">{projectedStock}</span>
+                                    </div>
                                   ) : (
-                                    <span className="inline-block text-[9px] bg-emerald-950 text-emerald-400 font-black px-2 py-0.5 rounded border border-emerald-900 uppercase tracking-wider">
-                                      ✨ New Item
-                                    </span>
+                                    <div className="text-[11px] text-emerald-400 font-semibold">
+                                      New Product
+                                    </div>
                                   )}
                                 </td>
                                 <td className="p-2.5 text-center">
                                   <button
+                                    type="button"
                                     onClick={() => handleRemoveExtractedItem(p.tempId)}
-                                    className="text-red-500 hover:text-red-400 p-1.5 hover:bg-red-950/30 rounded-lg cursor-pointer"
+                                    className="text-red-400 hover:text-red-300 p-1.5 hover:bg-red-950/30 rounded-lg cursor-pointer"
+                                    aria-label={`Remove ${p.name}`}
                                   >
                                     ✕
                                   </button>
@@ -2028,10 +2148,10 @@ export default function Inventory({
                     </div>
                   </div>
                 ) : (
-                  <div className="py-14 bg-slate-950/20 border border-slate-800/60 rounded-2xl flex flex-col items-center justify-center text-center p-4">
-                    <Sparkles className="w-8 h-8 text-slate-700 mb-2 animate-pulse" />
-                    <div className="text-slate-500 text-xs font-semibold">No extracted items to display yet.</div>
-                    <p className="text-[10px] text-slate-600 max-w-sm mt-0.5">Click "Start AI Scan" to begin processing your photo queue. Extracted items will populate here for review before saving.</p>
+                  <div className="py-12 bg-slate-950/20 border border-slate-800/60 rounded-2xl flex flex-col items-center justify-center text-center p-4">
+                    <ImageIcon className="w-8 h-8 text-slate-600 mb-2" />
+                    <div className="text-slate-400 text-xs font-semibold">No extracted items yet</div>
+                    <p className="text-[11px] text-slate-500 max-w-sm mt-1">Add one or more purchase bill photos or PDFs above and click Start Scan to review extracted items before saving.</p>
                   </div>
                 )}
               </div>
@@ -2040,9 +2160,10 @@ export default function Inventory({
 
             {/* Footer */}
             <div className="p-6 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-950/40 flex-shrink-0 text-xs">
-              <div className="text-slate-400 font-semibold leading-relaxed text-center sm:text-left">
-                <span>Total Items Extracted: <b className="text-purple-400 font-black font-mono">{batchScanExtractedProducts.length}</b>. </span>
-                <span className="block sm:inline text-[10px]">Verify details, edit prices or quantities directly in the sheet above.</span>
+              <div className="text-slate-400 font-medium leading-relaxed text-center sm:text-left">
+                <span>Items ready to save: <b className="text-white font-bold font-mono tabular-nums">{batchScanExtractedProducts.length}</b></span>
+                <span className="mx-2 text-slate-600" aria-hidden="true">·</span>
+                <span className="text-[11px]">Duplicate items automatically add scanned quantity to existing stock.</span>
               </div>
               
               <div className="flex gap-2.5 w-full sm:w-auto">
@@ -2050,7 +2171,7 @@ export default function Inventory({
                   type="button"
                   disabled={isBatchScanning}
                   onClick={() => setShowBatchScanModal(false)}
-                  className="flex-1 sm:flex-none justify-center px-5 py-3 border border-slate-750 hover:bg-slate-800 rounded-xl font-bold text-slate-300 transition-all cursor-pointer"
+                  className="flex-1 sm:flex-none justify-center px-5 py-2.5 border border-slate-700 hover:bg-slate-800 rounded-xl font-bold text-slate-300 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -2058,9 +2179,9 @@ export default function Inventory({
                   type="button"
                   disabled={isBatchScanning || batchScanExtractedProducts.length === 0}
                   onClick={handleCommitBatchProducts}
-                  className="flex-1 sm:flex-none justify-center px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-black rounded-xl shadow-lg shadow-purple-900/35 transition-all flex items-center space-x-1.5 cursor-pointer"
+                  className="flex-1 sm:flex-none justify-center px-6 py-2.5 bg-[#2563eb] hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition-colors flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
                 >
-                  <span>✓ Confirm & Save All Stocks</span>
+                  <span>Save to Inventory</span>
                 </button>
               </div>
             </div>

@@ -11,6 +11,7 @@ export interface Client {
   id: number;
   name: string;
   phone: string;
+  email?: string;
   gstin: string;
   address: string;
   stateCode?: string;

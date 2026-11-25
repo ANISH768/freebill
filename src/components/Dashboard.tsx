@@ -41,7 +41,8 @@ import {
   ShieldCheck,
   Clock,
   Landmark,
-  Sliders
+  Sliders,
+  Mail
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -61,6 +62,8 @@ interface DashboardProps {
   onAddNewClient?: () => void;
   onViewLedgers?: () => void;
   onOpenPrintSetup?: () => void;
+  onEmailBill?: (est: Estimate) => void;
+  onEmailReminder?: (params: { clientName: string; recipientEmail?: string; amountDue: number }) => void;
 }
 
 export type { DatePreset, CustomerTypeFilter, StatusFilter, ChartInterval };
@@ -88,7 +91,9 @@ export default function Dashboard({
   onAddNewProduct,
   onAddNewClient,
   onViewLedgers,
-  onOpenPrintSetup
+  onOpenPrintSetup,
+  onEmailBill,
+  onEmailReminder
 }: DashboardProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -996,6 +1001,17 @@ export default function Dashboard({
                               </a>
                             )}
 
+                            {onEmailBill && (
+                              <button
+                                type="button"
+                                onClick={() => onEmailBill(est)}
+                                className="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                title="Email Bill via Gmail"
+                              >
+                                <Mail className="w-4 h-4" />
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => onEditEstimate(est.id)}
@@ -1115,6 +1131,21 @@ export default function Dashboard({
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
                           </a>
+                        )}
+                        {onEmailReminder && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onEmailReminder({
+                                clientName: name,
+                                amountDue: info.baki,
+                              })
+                            }
+                            className="p-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-all cursor-pointer"
+                            title="Send Payment Reminder via Gmail"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>

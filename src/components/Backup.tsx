@@ -3,6 +3,7 @@ import { Client, Product, Estimate, User, AuditLog, StockLog } from '../types';
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { encryptData, decryptData } from '../utils/crypto';
 import { getPermanentIpForUser } from '../utils/permanentIp';
+import GoogleAccountSyncControl from './GoogleAccountSyncControl';
 
 interface BackupProps {
   clients: Client[];
@@ -27,6 +28,11 @@ interface BackupProps {
   onRunHealthCheck?: () => { issuesFound: number; fixedDetails: string[] };
   onOpenPrintCustomizer?: () => void;
   onOpenFileImport?: () => void;
+  stockLogsCount?: number;
+  isCloudAccountSyncing?: boolean;
+  lastCloudAccountSync?: string | null;
+  onSyncLocalToCloudAccount?: () => void;
+  onPullFromCloudAccount?: () => void;
 }
 
 interface ParsedBackupSummary {
@@ -53,7 +59,12 @@ export default function Backup({
   onForceDownload,
   onRunHealthCheck,
   onOpenPrintCustomizer,
-  onOpenFileImport
+  onOpenFileImport,
+  stockLogsCount = 0,
+  isCloudAccountSyncing = false,
+  lastCloudAccountSync = null,
+  onSyncLocalToCloudAccount,
+  onPullFromCloudAccount
 }: BackupProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -790,6 +801,22 @@ export default function Backup({
           <ShieldAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
           <span className="font-bold leading-relaxed">{error}</span>
         </div>
+      )}
+
+      {onSyncLocalToCloudAccount && (
+        <GoogleAccountSyncControl
+          variant="card"
+          isSyncing={isCloudAccountSyncing}
+          lastSyncedAt={lastCloudAccountSync}
+          localRecordCount={{
+            bills: estimates.length,
+            products: products.length,
+            clients: clients.length,
+            stockLogs: stockLogsCount,
+          }}
+          onSyncLocalData={onSyncLocalToCloudAccount}
+          onPullCloudData={onPullFromCloudAccount}
+        />
       )}
 
       {/* ----------------- PERMANENT PER-USER-ID LAN IP & 2-PC AUTO-LOGIN SETUP ----------------- */}

@@ -25,7 +25,8 @@ import {
   ArrowUpDown,
   MessageSquare,
   Eye,
-  Download
+  Download,
+  Mail
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -39,6 +40,7 @@ interface StatementsProps {
   onUpdateClientPayments: (clientId: number, openingBalance: number, payments: PaymentRecord[]) => void;
   onEditEstimate?: (id: number) => void;
   onPrintEstimate?: (id: number) => void;
+  onEmailReminder?: (params: { clientName: string; recipientEmail?: string; amountDue: number }) => void;
 }
 
 export default function Statements({ 
@@ -49,7 +51,8 @@ export default function Statements({
   initialClientId = '',
   onUpdateClientPayments,
   onEditEstimate,
-  onPrintEstimate
+  onPrintEstimate,
+  onEmailReminder
 }: StatementsProps) {
   const [selectedClientId, setSelectedClientId] = useState<number | ''>(initialClientId ? Number(initialClientId) : '');
   const [viewMode, setViewMode] = useState<'all' | 'single'>(initialClientId ? 'single' : 'all');
@@ -1187,6 +1190,24 @@ export default function Statements({
                               >
                                 <MessageSquare className="w-4 h-4" />
                               </a>
+                            )}
+
+                            {/* Gmail Balance Reminder */}
+                            {onEmailReminder && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onEmailReminder({
+                                    clientName: s.client.name,
+                                    recipientEmail: s.client.email,
+                                    amountDue: Math.max(0, s.netOutstanding),
+                                  })
+                                }
+                                className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Send Balance Reminder via Gmail"
+                              >
+                                <Mail className="w-4 h-4" />
+                              </button>
                             )}
                           </div>
                         </td>

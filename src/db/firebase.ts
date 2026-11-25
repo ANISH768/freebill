@@ -42,8 +42,9 @@ export function getFirebaseDb(): Firestore {
   if (dbInstance) return dbInstance;
   const app = getFirebaseApp();
   try {
-    if (firebaseConfigJson.firestoreDatabaseId && firebaseConfigJson.firestoreDatabaseId !== '(default)') {
-      dbInstance = getFirestore(app, firebaseConfigJson.firestoreDatabaseId);
+    const dbId = (firebaseConfigJson as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+    if (dbId && dbId !== '(default)') {
+      dbInstance = getFirestore(app, dbId);
     } else {
       dbInstance = getFirestore(app);
     }
